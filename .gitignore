@@ -1,0 +1,42 @@
+# Environment & secrets
+.env
+.env.*
+*.key
+secrets.json
+config.local.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Node (if any JS tooling)
+node_modules/
+npm-debug.log*
+
+# Logs & data
+*.log
+logs/
+*.csv
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
