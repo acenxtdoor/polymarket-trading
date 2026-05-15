@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from polymarket.api import get_leaderboard, get_trader_trades
 from utils.logger import get_logger
@@ -33,8 +35,8 @@ def fetch_top_traders() -> list[Trader]:
         if volume <= MIN_TRADER_VOLUME:
             continue
         traders.append(Trader(
-            address=row.get("address", row.get("wallet", "")),
-            username=row.get("name", row.get("username", "unknown")),
+            address=row.get("address") or row.get("wallet") or "",
+            username=row.get("name") or row.get("username") or "unknown",
             volume=volume,
             pnl=float(row.get("pnl", 0) or 0),
         ))
@@ -53,12 +55,12 @@ def get_trader_signals(trader: Trader) -> list[TradeSignal]:
     trades = get_trader_trades(trader.address)
     signals = []
     for trade in trades:
-        side = trade.get("side", "").upper()
+        side = (trade.get("side") or "").upper()
         if side != "BUY":
             continue
-        slug = trade.get("market", trade.get("slug", ""))
-        token_id = trade.get("asset_id", trade.get("token_id", ""))
-        outcome = trade.get("outcome", "YES")
+        slug = trade.get("market") or trade.get("slug") or ""
+        token_id = trade.get("asset_id") or trade.get("token_id") or ""
+        outcome = trade.get("outcome") or "YES"
         price = float(trade.get("price", 0) or 0)
         if not slug or not token_id or price <= 0:
             continue

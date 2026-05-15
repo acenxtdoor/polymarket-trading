@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import requests
 from config import CLOB_BASE_URL, GAMMA_BASE_URL, DATA_BASE_URL, REQUEST_TIMEOUT
 from utils.logger import get_logger
@@ -12,6 +14,9 @@ def _get(url: str, params: dict = None) -> dict | list | None:
         return resp.json()
     except requests.RequestException as e:
         logger.error(f"GET {url} failed: {e}")
+        return None
+    except ValueError as e:
+        logger.error(f"GET {url} returned invalid JSON: {e}")
         return None
 
 
