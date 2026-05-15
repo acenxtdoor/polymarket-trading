@@ -18,14 +18,18 @@ def _get(url: str, params: dict = None) -> dict | list | None:
 def get_market(slug: str) -> dict | None:
     """Fetch market metadata from Gamma API by slug."""
     data = _get(f"{GAMMA_BASE_URL}/markets", params={"slug": slug})
-    if data and len(data) > 0:
+    if isinstance(data, list) and len(data) > 0:
         return data[0]
+    if isinstance(data, dict):
+        return data
     return None
 
 
 def get_markets(limit: int = 100, offset: int = 0) -> list:
     """Fetch a page of active markets from Gamma API."""
     data = _get(f"{GAMMA_BASE_URL}/markets", params={"limit": limit, "offset": offset, "active": "true"})
+    if isinstance(data, dict):
+        return data.get("data", data.get("results", []))
     return data or []
 
 

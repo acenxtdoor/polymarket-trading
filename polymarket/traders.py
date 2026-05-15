@@ -43,7 +43,8 @@ def fetch_top_traders() -> list[Trader]:
     top = traders[:TOP_TRADER_COUNT]
     logger.info(f"Fetched {len(top)} top traders")
     for t in top:
-        logger.info(f"  {t.username} ({t.address[:8]}...) — volume: ${t.volume:,.0f}, pnl: ${t.pnl:,.0f}")
+        short_addr = t.address[:8] if t.address else "unknown"
+        logger.info(f"  {t.username} ({short_addr}...) — volume: ${t.volume:,.0f}, pnl: ${t.pnl:,.0f}")
     return top
 
 
