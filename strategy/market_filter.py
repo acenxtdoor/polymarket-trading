@@ -21,6 +21,12 @@ def _parse_close_time(meta: dict) -> datetime | None:
         raw = meta.get(key)
         if not raw:
             continue
+        # Handle Unix timestamps (int or float)
+        try:
+            return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            pass
+        # Handle ISO 8601 strings
         try:
             dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
             if dt.tzinfo is None:
