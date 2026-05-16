@@ -66,6 +66,6 @@ def position_size(
     logger.info(
         f"Kelly sizing: p={p:.3f} price={price:.3f} f*={f:.4f} "
         f"conviction={conviction_multiplier}x kalshi={kalshi_multiplier}x "
-        f"→ capped at {capped:.2%} of bankroll = ${size:.2f}"
+        f"-> capped at {capped:.2%} of bankroll = ${size:.2f}"
     )
     return size
