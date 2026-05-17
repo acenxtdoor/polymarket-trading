@@ -1,3 +1,5 @@
+import os
+
 CLOB_BASE_URL = "https://clob.polymarket.com"
 GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DATA_BASE_URL = "https://data-api.polymarket.com"
@@ -19,3 +21,10 @@ KALSHI_CACHE_TTL = 600         # 10 minutes
 MARKET_CACHE_TTL = 300         # 5 minutes
 
 REQUEST_TIMEOUT = 10
+
+# Intelligence layer (JARVIS)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
+OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", r"C:\Users\aadha\OneDrive\Trading Journal")
+NEWS_MAX_ARTICLES = 5
+INTELLIGENCE_WORKERS = 4  # parallel Claude calls
