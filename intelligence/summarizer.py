@@ -61,6 +61,14 @@ Write the daily briefing."""
 
 
 def generate_daily_summary(data: DailySummaryInput) -> str:
+    if not config.ANTHROPIC_API_KEY:
+        d = data.run_date or date.today()
+        return (
+            f"JARVIS offline — no ANTHROPIC_API_KEY set.\n\n"
+            f"**{d.isoformat()}:** {len(data.trades_placed)} trade(s) placed, "
+            f"{len(data.trades_skipped)} skipped. Bankroll: ${data.bankroll:,.2f}."
+        )
+
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     prompt = _build_prompt(data)
 

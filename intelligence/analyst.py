@@ -97,6 +97,14 @@ def assess_market(
     avg_trader_price: float,
     kalshi_signal: str,
 ) -> MarketAssessment:
+    if not config.ANTHROPIC_API_KEY:
+        return MarketAssessment(
+            market_id=market_id,
+            confidence="medium",
+            summary="JARVIS offline — no ANTHROPIC_API_KEY set. Proceeding on trader signals only.",
+            flags=[],
+        )
+
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
     user_msg = _build_user_message(
