@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+# Add the project root to sys.path so it can find 'config', 'utils', etc. when run directly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from config import MAX_POSITION_PCT
-from polymarket.traders import TradeSignal
+from polymarket.traders import TradeSignal, Trader
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,6 +47,8 @@ class AggregatedSignal:
     # Representative price: median of individual signal prices.
     @property
     def price(self) -> float:
+        if not self.signals:
+            return 0.0
         prices = sorted(s.price for s in self.signals)
         mid = len(prices) // 2
         if len(prices) % 2 == 1:
@@ -123,46 +130,12 @@ class SignalAggregator:
     Groups TradeSignals by (market_slug, outcome) across loop iterations,
     maintains a pending queue for single-trader signals, and promotes them
     to execution decisions once consensus is reached.
-
-    Intended usage in the main loop
-    --------------------------------
-        aggregator = SignalAggregator()
-        engine     = ConvictionEngine()
-
-        while True:
-            signals  = collect_all_signals(traders)          # fresh each tick
-            decisions = aggregator.process(signals, engine, base_kelly, bankroll)
-
-            for decision in decisions:
-                if decision.conviction.execute:
-                    place_order(decision)   # Step 8
-                # pending decisions are silently retained in the queue
-
-            aggregator.expire_pending(max_age_seconds=3600)  # optional TTL
-            time.sleep(300)
-
-    Key behaviour
-    -------------
-    - Each call to process() rebuilds the current-tick aggregation from the
-      fresh signal list, then merges with any signals already in the pending
-      queue that are NOT present in this tick (stale pending signals are kept
-      until explicitly expired via expire_pending()).
-    - A trader address can only contribute one signal per market+outcome key
-      per tick; duplicate addresses within the same tick are deduplicated so
-      that a single trader cannot inflate the count.
-    - The pending queue is keyed by (market_slug, outcome).  When a pending
-      entry reaches the execution threshold it is removed from the queue and
-      returned as execute=True.
     """
 
     def __init__(self) -> None:
         # (market_slug, outcome) → AggregatedSignal for single-trader signals
         # waiting for a second confirmation.
         self._pending: dict[tuple[str, str], AggregatedSignal] = {}
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def process(
         self,
@@ -206,7 +179,6 @@ class SignalAggregator:
             ))
 
         # Emit decisions for keys that are only in the pending queue this tick
-        # so the caller knows they still exist but haven't been re-signalled.
         for key, agg in self._pending.items():
             if key not in seen_keys:
                 conviction = engine.evaluate(base_kelly_size, agg.trader_count, bankroll)
@@ -220,11 +192,6 @@ class SignalAggregator:
         return decisions
 
     def expire_pending(self, max_age_seconds: int = 3600) -> None:
-        """
-        Remove pending signals whose oldest contributing signal is stale.
-        Uses the 'timestamp' field from the raw trade dict if present;
-        falls back to keeping the entry if no timestamp is parseable.
-        """
         import time
         now = time.time()
         to_delete: list[tuple[str, str]] = []
@@ -239,10 +206,6 @@ class SignalAggregator:
                     pass
             if timestamps and (now - min(timestamps)) > max_age_seconds:
                 to_delete.append(key)
-                logger.info(
-                    f"[PENDING EXPIRED] {key[0]} {key[1]} — "
-                    f"oldest signal {int(now - min(timestamps))}s ago"
-                )
 
         for key in to_delete:
             del self._pending[key]
@@ -251,20 +214,12 @@ class SignalAggregator:
     def pending_count(self) -> int:
         return len(self._pending)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _group(signals: list[TradeSignal]) -> dict[tuple[str, str], AggregatedSignal]:
-        """Deduplicate by trader address within each key, then aggregate."""
-        # (market_slug, outcome) → { trader_address → TradeSignal }
         buckets: dict[tuple[str, str], dict[str, TradeSignal]] = defaultdict(dict)
-
         for sig in signals:
             key = (sig.market_slug, sig.outcome)
             addr = sig.trader.address
-            # Keep the signal with the higher price if the same trader appears twice
             existing = buckets[key].get(addr)
             if existing is None or sig.price > existing.price:
                 buckets[key][addr] = sig
@@ -283,12 +238,10 @@ class SignalAggregator:
         key: tuple[str, str],
         current: AggregatedSignal,
     ) -> AggregatedSignal:
-        """Combine current-tick signals with any already in the pending queue."""
         pending = self._pending.get(key)
         if pending is None:
             return current
 
-        # Merge: current-tick signals take precedence for the same trader address
         addr_map: dict[str, TradeSignal] = {s.trader.address: s for s in pending.signals}
         for sig in current.signals:
             addr_map[sig.trader.address] = sig
@@ -298,3 +251,28 @@ class SignalAggregator:
             outcome=key[1],
             signals=list(addr_map.values()),
         )
+
+
+if __name__ == "__main__":
+    # Simple standalone test
+    engine = ConvictionEngine()
+    aggregator = SignalAggregator()
+
+    t1 = Trader("0x1", "trader1", 100000, 5000)
+    t2 = Trader("0x2", "trader2", 200000, 10000)
+    t3 = Trader("0x3", "trader3", 300000, 15000)
+
+    mock_signals = [
+        TradeSignal("test-market", "token-y", "YES", 0.65, t1),
+        TradeSignal("test-market", "token-y", "YES", 0.67, t2),
+        TradeSignal("other-market", "token-n", "NO", 0.30, t3),
+    ]
+
+    print("\n--- Processing Mock Signals ---")
+    decisions = aggregator.process(mock_signals, engine, base_kelly_size=500.0, bankroll=10000.0)
+
+    for d in decisions:
+        status = "EXECUTE" if d.conviction.execute else "PENDING"
+        print(f"[{status}] {d.market_slug} ({d.outcome}): "
+              f"Traders: {d.aggregated.trader_count}, "
+              f"Size: ${d.conviction.size:.2f}")
