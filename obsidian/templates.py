@@ -35,7 +35,7 @@ def trade_note(
     d = trade_date or date.today()
     tags_list = tags or ["trade", action.lower()]
     outcome_str = outcome or "open"
-    pnl_str = f"{pnl:.2f}" if pnl is not None else "null"
+    pnl_str = f"{pnl:.2f}" if pnl is not None else "0"
 
     return f"""\
 ---

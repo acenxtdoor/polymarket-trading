@@ -152,7 +152,7 @@ def update_trade_outcome(
 
     text = note_path.read_text(encoding="utf-8")
     text = re.sub(r'outcome: "open"', f'outcome: "{outcome}"', text)
-    text = re.sub(r'pnl: null', f'pnl: {pnl:.2f}', text)
+    text = re.sub(r'pnl: [\d\.\-]+', f'pnl: {pnl:.2f}', text)
     text = re.sub(r'\*\*Status:\*\* open', f'**Status:** {outcome}', text)
     text = re.sub(r'\*\*P&L:\*\* —', f'**P&L:** ${pnl:,.2f}', text)
     note_path.write_text(text, encoding="utf-8")
