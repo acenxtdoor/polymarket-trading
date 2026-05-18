@@ -96,5 +96,17 @@ See [PLANNING.md](PLANNING.md) for full technical details.
 ## Running tests
 
 ```bash
+python tests/test_conviction.py
+```
+
+```bash
+python tests/test_kalshi.py
+```
+
+```bash
 python tests/test_kelly.py
+```
+
+```bash
+python tests/test_slippage.py
 ```
