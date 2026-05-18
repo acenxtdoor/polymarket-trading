@@ -73,17 +73,27 @@ def _fetch_kalshi_markets(query: str) -> list[dict]:
 
 
 def _implied_prob(market: dict) -> float | None:
-    """Mid-price of yes_bid / yes_ask as implied probability (0–1 scale)."""
+    """Mid-price of yes_bid / yes_ask as implied probability (0–1 scale).
+
+    Kalshi prices can be in cent scale (0–100) or decimal scale (0–1).
+    We detect cent scale by checking whether either raw value exceeds 1,
+    rather than the mid — this correctly handles near-zero probabilities
+    like yes_bid=0, yes_ask=2 where the mid (1.0) would otherwise pass
+    the decimal-scale check incorrectly.
+    """
     bid = market.get("yes_bid")
     ask = market.get("yes_ask")
     if bid is None or ask is None:
         return None
     try:
-        # Kalshi prices are in cents (0–100), normalise to 0–1
-        mid = (float(bid) + float(ask)) / 2
-        if mid > 1:
-            mid /= 100
-        return mid
+        bid_f = float(bid)
+        ask_f = float(ask)
+        # If either raw value exceeds 1, the prices are in cent scale
+        if bid_f > 1 or ask_f > 1:
+            bid_f /= 100
+            ask_f /= 100
+        mid = (bid_f + ask_f) / 2
+        return max(0.0, min(1.0, mid))  # clamp to valid probability range
     except (TypeError, ValueError):
         return None
 
@@ -115,8 +125,12 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
     Returns:
         KalshiResult with signal, multiplier, and match metadata.
     """
-    # Use first 6 meaningful words as search query to avoid overly long queries
-    words = [w for w in market_title.split() if len(w) > 2]
+    if not (0.0 < polymarket_price < 1.0):
+        logger.warning(f"[KALSHI] Invalid polymarket_price={polymarket_price} — must be (0, 1)")
+        return KalshiResult(signal=NO_MATCH, multiplier=_MULTIPLIERS[NO_MATCH])
+
+    # Use first 6 meaningful words as search query; keep 2-char words (US, UK, AI, EU)
+    words = [w for w in market_title.split() if len(w) > 1]
     query = " ".join(words[:6])
 
     markets = _fetch_kalshi_markets(query)

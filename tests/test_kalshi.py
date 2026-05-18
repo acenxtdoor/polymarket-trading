@@ -258,5 +258,102 @@ class TestEdgeCases(unittest.TestCase):
         self.assertIn("Fed", result.kalshi_title)
 
 
+# ── Bug-fix regression tests ──────────────────────────────────────────────────
+
+class TestImpliedProbBugFixes(unittest.TestCase):
+    """Regression tests for the three bugs found during code review."""
+
+    def test_near_zero_cent_scale_bid_zero(self):
+        """Bug fix: yes_bid=0, yes_ask=2 (cent scale) must return 0.01, not 1.0."""
+        market = {"yes_bid": 0, "yes_ask": 2}
+        result = _implied_prob(market)
+        self.assertAlmostEqual(result, 0.01, places=4)
+
+    def test_near_zero_cent_scale_both_low(self):
+        """Bug fix: yes_bid=1, yes_ask=3 (cent scale) must return 0.02, not 0.02 direct."""
+        market = {"yes_bid": 1, "yes_ask": 3}
+        result = _implied_prob(market)
+        self.assertAlmostEqual(result, 0.02, places=4)
+
+    def test_scale_detection_uses_raw_values_not_mid(self):
+        """Bug fix: detection is based on raw bid/ask, not the mid-price."""
+        # yes_bid=0, yes_ask=2 → mid=1.0 which incorrectly passed the old > 1 check
+        # New logic: ask=2 > 1, so correctly treats as cent scale
+        market = {"yes_bid": 0, "yes_ask": 2}
+        self.assertAlmostEqual(_implied_prob(market), 0.01, places=4)
+
+    def test_prob_clamped_to_zero_on_zero_bid_ask(self):
+        """Prob is clamped to [0, 1] — zero bid/ask yields 0.0."""
+        market = {"yes_bid": 0, "yes_ask": 0}
+        result = _implied_prob(market)
+        self.assertEqual(result, 0.0)
+
+
+class TestWordFilterBugFix(unittest.TestCase):
+    """Regression tests for the 2-char word filter bug."""
+
+    def setUp(self):
+        _cache._store.clear()
+
+    def test_two_char_words_included_in_query(self):
+        """Bug fix: 'US', 'UK', 'AI', 'EU' must not be stripped from the search query."""
+        markets = [_make_market("Will the US raise interest rates?", 0.58, 0.62)]
+        mock_get = _mock_get(markets)
+        with patch("strategy.kalshi.requests.get", mock_get):
+            get_kalshi_signal("Will the US raise interest rates?", 0.60)
+        call_params = mock_get.call_args
+        query_used = call_params[1]["params"]["search"]
+        self.assertIn("US", query_used)
+
+    def test_single_char_words_still_excluded(self):
+        """Single-char words (e.g. 'a', 'I') are still filtered."""
+        markets = [_make_market("Will a rate cut happen?", 0.58, 0.62)]
+        mock_get = _mock_get(markets)
+        with patch("strategy.kalshi.requests.get", mock_get):
+            get_kalshi_signal("Will a rate cut happen?", 0.60)
+        query_used = mock_get.call_args[1]["params"]["search"]
+        # 'a' should not appear as a standalone word in the query
+        self.assertNotIn(" a ", f" {query_used} ")
+
+
+class TestPolymarketPriceValidation(unittest.TestCase):
+    """Regression tests for invalid polymarket_price guard."""
+
+    def setUp(self):
+        _cache._store.clear()
+
+    def test_price_zero_returns_no_match(self):
+        """polymarket_price=0 is invalid — must return NO_MATCH without API call."""
+        mock_get = _mock_get([])
+        with patch("strategy.kalshi.requests.get", mock_get):
+            result = get_kalshi_signal("Some market", 0.0)
+        self.assertEqual(result.signal, NO_MATCH)
+        mock_get.assert_not_called()
+
+    def test_price_one_returns_no_match(self):
+        """polymarket_price=1 is invalid — must return NO_MATCH without API call."""
+        mock_get = _mock_get([])
+        with patch("strategy.kalshi.requests.get", mock_get):
+            result = get_kalshi_signal("Some market", 1.0)
+        self.assertEqual(result.signal, NO_MATCH)
+        mock_get.assert_not_called()
+
+    def test_price_negative_returns_no_match(self):
+        """Negative polymarket_price is invalid — must return NO_MATCH."""
+        mock_get = _mock_get([])
+        with patch("strategy.kalshi.requests.get", mock_get):
+            result = get_kalshi_signal("Some market", -0.1)
+        self.assertEqual(result.signal, NO_MATCH)
+        mock_get.assert_not_called()
+
+    def test_price_above_one_returns_no_match(self):
+        """polymarket_price > 1 is invalid — must return NO_MATCH."""
+        mock_get = _mock_get([])
+        with patch("strategy.kalshi.requests.get", mock_get):
+            result = get_kalshi_signal("Some market", 1.5)
+        self.assertEqual(result.signal, NO_MATCH)
+        mock_get.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
