@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+import sys
+
+# Add the project root to sys.path so it can find 'config' and 'utils' when run directly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from datetime import datetime, timezone
 
 from config import (
