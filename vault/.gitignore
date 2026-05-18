@@ -1,0 +1,10 @@
+# Runtime-generated note folders — excluded from git
+Trades/
+Skipped/
+Daily Reports/
+Markets/
+
+# Obsidian workspace state
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
