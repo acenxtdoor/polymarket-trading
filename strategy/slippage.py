@@ -131,22 +131,50 @@ def _get_liquidity(market_id: str, market_filter: MarketFilter) -> float:
     Extracts liquidityNum from the MarketFilter cache for the given market.
 
     Expects market_filter to expose either:
-        market_filter.get_market(market_id)  → dict with "liquidityNum" key
-        market_filter.cache                  → dict[market_id, metadata_dict]
+        market_filter.get_market_metadata(market_id)  → dict with "liquidityNum" key
+        market_filter.get_market(market_id)           → dict with "liquidityNum" key
+        market_filter._cache                          → TTLCache
+        market_filter.cache                           → dict[market_id, metadata_dict]
 
     Raises ValueError if the market is not found in the cache.
     """
-    # Try the public accessor first, fall back to direct cache access
     metadata = None
 
-    if hasattr(market_filter, "get_market"):
+    # Try get_market_metadata (real MarketFilter public method)
+    if hasattr(market_filter, "get_market_metadata"):
         try:
-            metadata = market_filter.get_market(market_id)
+            val = market_filter.get_market_metadata(market_id)
+            if isinstance(val, dict):
+                metadata = val
         except Exception:
             pass
 
+    # Try get_market (mock/legacy method)
+    if metadata is None and hasattr(market_filter, "get_market"):
+        try:
+            val = market_filter.get_market(market_id)
+            if isinstance(val, dict):
+                metadata = val
+        except Exception:
+            pass
+
+    # Try _cache (real MarketFilter private cache attribute)
+    if metadata is None and hasattr(market_filter, "_cache"):
+        try:
+            val = market_filter._cache.get(market_id)
+            if isinstance(val, dict):
+                metadata = val
+        except Exception:
+            pass
+
+    # Try cache (mock/legacy dict attribute)
     if metadata is None and hasattr(market_filter, "cache"):
-        metadata = market_filter.cache.get(market_id)
+        try:
+            val = market_filter.cache.get(market_id)
+            if isinstance(val, dict):
+                metadata = val
+        except Exception:
+            pass
 
     if metadata is None:
         raise ValueError(
