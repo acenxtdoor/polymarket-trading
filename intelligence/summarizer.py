@@ -6,8 +6,12 @@ Streams a JARVIS-style narrative from Claude and saves it to the Obsidian vault.
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass
 from datetime import date
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import anthropic
 import config

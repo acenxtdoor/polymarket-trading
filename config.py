@@ -32,3 +32,17 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", r"C:\Users\aadha\OneDrive\Trading Journal")
 NEWS_MAX_ARTICLES = 5
 INTELLIGENCE_WORKERS = 4  # parallel Claude calls
+
+# JARVIS watchlist — per-period market selection
+# Only consider markets resolving inside this near-term window (hours).
+WATCHLIST_MIN_RESOLUTION_HOURS = 24        # skip markets resolving sooner than this
+WATCHLIST_MAX_RESOLUTION_HOURS = 7 * 24    # skip markets resolving later than ~1 week
+WATCHLIST_MIN_SCORE = 50.0                 # bot trades entries scoring at/above this
+
+# Score = base(confidence) + conviction bonus + Kalshi-agree bonus, clamped to 0–100.
+# confidence == "skip" or Kalshi "disagree" force the score to 0 (excluded).
+WATCHLIST_CONFIDENCE_BASE = {"skip": 0.0, "low": 30.0, "medium": 60.0, "high": 85.0}
+WATCHLIST_CONVICTION_BASELINE = 2          # trader count at which the bonus starts
+WATCHLIST_CONVICTION_BONUS_PER_TRADER = 3.0
+WATCHLIST_CONVICTION_BONUS_CAP = 9.0
+WATCHLIST_KALSHI_AGREE_BONUS = 6.0
