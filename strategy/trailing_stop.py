@@ -28,6 +28,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 
@@ -218,25 +219,38 @@ class TrailingStopManager:
         Batch-update every market_id present in prices.
 
         Markets in self._positions that are not in prices are skipped.
+        Invalid prices (e.g. negative) are logged and skipped — they do not
+        abort the rest of the batch.
 
         Args:
             prices: dict mapping market_id → current YES price
 
         Returns:
-            List of StopResult for each updated position.
+            List of StopResult for each successfully updated position.
         """
         results: list[StopResult] = []
         for market_id, price in prices.items():
-            if market_id in self._positions:
+            if market_id not in self._positions:
+                continue
+            try:
                 results.append(self.update(market_id, price))
+            except ValueError as exc:
+                logger.warning(
+                    f"[TRAILING] check_all skipping '{market_id}': {exc}"
+                )
         return results
 
     # ── Properties ──────────────────────────────────────────────────────────
 
     @property
     def open_positions(self) -> dict[str, Position]:
-        """Read-only view of all currently tracked positions."""
-        return dict(self._positions)
+        """
+        Snapshot of all currently tracked positions.
+
+        Returns shallow copies of each Position so callers cannot accidentally
+        mutate internal peak_price / entry_price state.
+        """
+        return {mid: dataclasses.replace(pos) for mid, pos in self._positions.items()}
 
     @property
     def position_count(self) -> int:

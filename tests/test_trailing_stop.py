@@ -290,5 +290,48 @@ class TestOpenPositionsProperty(unittest.TestCase):
         self.assertEqual(m.open_positions, {})
 
 
+# ── Bug-fix regression tests ──────────────────────────────────────────────────
+
+class TestOpenPositionsMutability(unittest.TestCase):
+    """Regression: open_positions must return copies, not live references."""
+
+    def test_mutating_returned_position_does_not_affect_internal_state(self):
+        """Bug fix: external mutation of peak_price must not corrupt the manager."""
+        m = _manager_with_position(entry=0.60)
+        snapshot = m.open_positions
+        snapshot["mkt-001"].peak_price = 9999.0  # mutate the copy
+        # Internal peak must still be 0.60
+        internal = m._positions["mkt-001"]
+        self.assertAlmostEqual(internal.peak_price, 0.60, places=6)
+
+    def test_trail_price_on_copy_is_consistent(self):
+        """Copied Position trail_price still reflects its own peak_price."""
+        m = _manager_with_position(entry=0.60)
+        m.update("mkt-001", 0.80)  # advance peak
+        pos_copy = m.open_positions["mkt-001"]
+        expected_trail = 0.80 * (1 - STOP)
+        self.assertAlmostEqual(pos_copy.trail_price, expected_trail, places=6)
+
+
+class TestCheckAllErrorHandling(unittest.TestCase):
+    """Regression: a bad price in check_all must not abort the entire batch."""
+
+    def test_invalid_price_skipped_others_still_processed(self):
+        """Bug fix: negative price for one market must not stop others updating."""
+        m = TrailingStopManager()
+        m.open_position("mkt-good", 0.60)
+        m.open_position("mkt-bad", 0.50)
+        results = m.check_all({"mkt-good": 0.65, "mkt-bad": -0.10})
+        market_ids = [r.market_id for r in results]
+        self.assertIn("mkt-good", market_ids)
+        self.assertNotIn("mkt-bad", market_ids)
+
+    def test_all_invalid_returns_empty(self):
+        """All invalid prices → empty result list, no exception raised."""
+        m = _manager_with_position()
+        results = m.check_all({"mkt-001": -1.0})
+        self.assertEqual(results, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
