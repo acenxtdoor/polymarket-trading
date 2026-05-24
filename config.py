@@ -26,6 +26,11 @@ MARKET_CACHE_TTL = 300         # 5 minutes
 
 REQUEST_TIMEOUT = 10
 
+# Execution / portfolio
+DRY_RUN = True                 # paper trading — no real orders are ever placed
+INITIAL_BANKROLL = 10_000.0    # starting paper bankroll in USDC
+PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", "portfolio.json")
+
 # Intelligence layer (JARVIS)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")

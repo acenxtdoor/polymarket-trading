@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An automated Polymarket copy-trading bot. It copies the top 10 traders on Polymarket, aggregates their signals by conviction, cross-references with Kalshi, sizes positions via Kelly Criterion, runs a pre-trade AI analysis (JARVIS), and logs everything to an Obsidian vault.
 
-**Note: `main.py` does not exist yet.** The entry point and the `execution/` module (order placement, portfolio tracking) are planned but unimplemented. The strategy, intelligence, and Obsidian layers are complete.
+**Note: `main.py` does not exist yet.** The entry point is planned but unimplemented. The strategy, intelligence, Obsidian, and execution layers are complete. The `execution/` module is paper-only: `DRY_RUN=True` (config.py) means no real orders are ever placed — live CLOB order signing is left as a stub seam in `execution/order.py`.
 
 ## Commands
 
@@ -63,6 +63,10 @@ polymarket/api.py (get_leaderboard)
 **`intelligence/`**
 - `analyst.py` — calls `claude-opus-4-7` with adaptive thinking and ephemeral prompt caching. Returns a `MarketAssessment` with `confidence` (`high/medium/low/skip`) and `flags`. `assess_markets_parallel()` fans out across up to 4 workers. Degrades gracefully if `ANTHROPIC_API_KEY` is unset.
 - `summarizer.py` — streams a daily JARVIS briefing from `claude-opus-4-7` at end of run.
+
+**`execution/`**
+- `portfolio.py` — `Portfolio` tracks bankroll, open `Position`s (keyed by `market_slug`), and realized P&L, persisting to a JSON file (`PORTFOLIO_PATH`) on every mutation. `record_buy`/`record_sell` handle prediction-market share math (`shares = dollars / price`).
+- `order.py` — `OrderExecutor.buy()/sell()` place paper orders. `buy()` fills at the slippage-adjusted price from `estimate_slippage` and records the position; rejects on insufficient bankroll, unsafe slippage, or uncached market. `DRY_RUN=False` routes to `_live_buy/_live_sell`, which raise `NotImplementedError` (the live CLOB seam). Returns a frozen `OrderResult`.
 
 **`obsidian/`**
 - `writer.py` — writes Markdown notes to `OBSIDIAN_VAULT_PATH` (env var). Folders: `Trades/`, `Skipped/`, `Daily Reports/`, `Markets/`.
