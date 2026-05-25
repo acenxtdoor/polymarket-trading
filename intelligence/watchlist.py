@@ -60,6 +60,8 @@ class WatchlistEntry:
     summary: str
     flags: list[str]
     assessment: MarketAssessment
+    yes_price: float = 0.0          # current live market price (for Kelly denominator)
+    avg_trader_price: float = 0.0   # avg price top traders paid (for Kelly numerator / edge)
 
 
 @dataclass
@@ -162,6 +164,8 @@ def build_watchlist(
             summary=assessment.summary,
             flags=assessment.flags,
             assessment=assessment,
+            yes_price=c.yes_price,
+            avg_trader_price=c.avg_trader_price,
         ))
 
     entries.sort(key=lambda e: e.score, reverse=True)

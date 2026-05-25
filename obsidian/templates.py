@@ -8,10 +8,15 @@ from datetime import date, datetime
 from typing import Optional
 
 
+def _yaml_str(s: str) -> str:
+    """Escape a string for safe inclusion in a YAML double-quoted scalar."""
+    return str(s).replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _fmt_list(items: list[str]) -> str:
     if not items:
         return "[]"
-    return "[" + ", ".join(f'"{i}"' for i in items) + "]"
+    return "[" + ", ".join(f'"{_yaml_str(i)}"' for i in items) + "]"
 
 
 def trade_note(
@@ -39,19 +44,19 @@ def trade_note(
 
     return f"""\
 ---
-market_id: "{market_id}"
-market_title: "{market_title}"
+market_id: "{_yaml_str(market_id)}"
+market_title: "{_yaml_str(market_title)}"
 date: {d.isoformat()}
-action: "{action}"
+action: "{_yaml_str(action)}"
 conviction: {conviction}
-kalshi_signal: "{kalshi_signal}"
+kalshi_signal: "{_yaml_str(kalshi_signal)}"
 kelly_fraction: {kelly_fraction:.4f}
 position_size: {position_size:.2f}
 entry_price: {entry_price:.4f}
-claude_confidence: "{claude_confidence}"
+claude_confidence: "{_yaml_str(claude_confidence)}"
 claude_flags: {_fmt_list(claude_flags)}
 traders: {_fmt_list(traders)}
-outcome: "{outcome_str}"
+outcome: "{_yaml_str(outcome_str)}"
 pnl: {pnl_str}
 tags: {_fmt_list(tags_list)}
 ---
@@ -98,14 +103,14 @@ def skip_note(
 
     return f"""\
 ---
-market_id: "{market_id}"
-market_title: "{market_title}"
+market_id: "{_yaml_str(market_id)}"
+market_title: "{_yaml_str(market_title)}"
 date: {d.isoformat()}
 action: "SKIP"
-skip_reason: "{skip_reason}"
+skip_reason: "{_yaml_str(skip_reason)}"
 conviction: {conviction}
-kalshi_signal: "{kalshi_signal}"
-claude_confidence: "{claude_confidence}"
+kalshi_signal: "{_yaml_str(kalshi_signal)}"
+claude_confidence: "{_yaml_str(claude_confidence)}"
 claude_flags: {_fmt_list(claude_flags)}
 traders: {_fmt_list(traders)}
 tags: ["skipped"]
@@ -170,6 +175,15 @@ tags: ["dashboard"]
 # JARVIS Trading Dashboard
 
 > *Last updated automatically by the bot.*
+
+## Total P&L
+
+```dataview
+TABLE WITHOUT ID round(sum(rows.pnl), 2) as "Realized P&L ($)", length(rows) as "Closed Trades"
+FROM "Trades"
+WHERE outcome != "open"
+GROUP BY true
+```
 
 ## Active Positions
 

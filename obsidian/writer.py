@@ -142,10 +142,28 @@ def update_trade_outcome(
     outcome: str,
     pnl: float,
     trade_date: Optional[date] = None,
+    market_id: Optional[str] = None,
 ) -> bool:
+    """Update an existing trade note with the final outcome and P&L.
+
+    Tries today's filename first. If not found and market_id is supplied,
+    scans the Trades folder for a note containing that market_id in its
+    YAML frontmatter (handles positions opened on a previous date).
+    """
     d = trade_date or date.today()
     filename = f"{d.isoformat()}-{_safe_filename(market_title)}.md"
     note_path = _vault() / "Trades" / filename
+
+    if not note_path.exists() and market_id:
+        # Fallback: search all trade notes for the matching market_id
+        trades_dir = _vault() / "Trades"
+        for candidate in sorted(trades_dir.glob("*.md"), reverse=True):
+            try:
+                if f'market_id: "{market_id}"' in candidate.read_text(encoding="utf-8"):
+                    note_path = candidate
+                    break
+            except OSError:
+                continue
 
     if not note_path.exists():
         return False

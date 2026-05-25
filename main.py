@@ -61,7 +61,7 @@ from execution.portfolio import Portfolio
 from intelligence.summarizer import DailySummaryInput, generate_daily_summary
 from intelligence.watchlist import MarketCandidate, build_watchlist
 from news.newsapi import fetch_market_news
-from obsidian.writer import ensure_vault, write_daily_report, write_skip, write_trade
+from obsidian.writer import ensure_vault, update_trade_outcome, write_daily_report, write_skip, write_trade
 from polymarket.traders import collect_all_signals, fetch_top_traders
 from strategy.conviction import ConvictionEngine, SignalAggregator
 from strategy.kalshi import get_kalshi_signal
@@ -86,13 +86,32 @@ def _market_title(metadata: dict) -> str:
     return "Unknown market"
 
 
-def _hours_to_close(metadata: dict) -> float:
-    """Hours until market resolution (negative = already closed)."""
+def _hours_to_close(metadata: dict) -> float | None:
+    """Hours until market resolution. Returns None if close time cannot be parsed."""
     from strategy.market_filter import _parse_close_time
     close_dt = _parse_close_time(metadata)
     if close_dt is None:
-        return 0.0
+        return None
     return (close_dt - datetime.now(tz=timezone.utc)).total_seconds() / 3600
+
+
+def _extract_yes_price(market_data: dict | None, fallback: float) -> float:
+    """Extract the current YES token price from Gamma API market metadata.
+
+    The Gamma API returns a ``tokens`` array where each element has an
+    ``outcome`` field and a ``price`` field (0–1 scale).  We return the YES
+    token price, or ``fallback`` if the data is missing or malformed.
+    """
+    if market_data:
+        for token in market_data.get("tokens", []):
+            if str(token.get("outcome", "")).upper() == "YES":
+                try:
+                    price = float(token.get("price", 0))
+                    if 0.0 < price < 1.0:
+                        return price
+                except (TypeError, ValueError):
+                    pass
+    return fallback
 
 
 def _validate_env() -> None:
@@ -157,18 +176,34 @@ def run_once(
     for decision in actionable:
         slug = decision.market_slug
         if not market_filter.is_tradeable(slug):
+            # Fetch cached metadata for a better title (already in cache from is_tradeable)
+            _meta = market_filter.get_market_metadata(slug) or {}
+            _title = _market_title(_meta) or slug
             session_skips.append({
-                "market_title": slug,
+                "market_title": _title,
                 "skip_reason": "failed market quality filter",
             })
+            write_skip(
+                market_id=slug,
+                market_title=_title,
+                skip_reason="failed market quality filter",
+                conviction=decision.aggregated.trader_count,
+                kalshi_signal="no_match",
+                claude_confidence="skip",
+                claude_summary="Market failed quality checks (volume, liquidity, or timing).",
+                claude_flags=["Quality filter rejection"],
+                traders=[s.trader.username for s in decision.aggregated.signals],
+            )
             continue
 
         metadata = market_filter.get_market_metadata(slug) or {}
         title = _market_title(metadata)
         agg = decision.aggregated
-        yes_price = agg.price
+        # avg_trader_price: weighted avg price top traders paid — used as estimated true probability
+        avg_trader_price = agg.price
         trader_count = agg.trader_count
-        avg_price = agg.price
+        # yes_price: current live market price from Gamma API (fallback: trader avg)
+        yes_price = _extract_yes_price(metadata, avg_trader_price)
 
         # ── d. News + Kalshi ──────────────────────────────────────────────
         articles = fetch_market_news(title)
@@ -193,14 +228,19 @@ def run_once(
             )
             continue
 
+        hours = _hours_to_close(metadata)
+        if hours is None:
+            logger.warning(f"[MAIN] {slug}: could not parse close time — skipping candidate")
+            continue
+
         candidates.append(MarketCandidate(
             market_id=slug,
             market_title=title,
             yes_price=yes_price,
             trader_count=trader_count,
-            avg_trader_price=avg_price,
+            avg_trader_price=avg_trader_price,
             kalshi_signal=kalshi_result.signal,
-            hours_to_resolution=_hours_to_close(metadata),
+            hours_to_resolution=hours,
             articles=articles,
         ))
 
@@ -257,7 +297,10 @@ def run_once(
         kalshi_result = get_kalshi_signal(entry.market_title, entry.yes_price)
         size = position_size(
             bankroll=portfolio.bankroll,
-            p=entry.yes_price,
+            # p = avg price top traders paid → their implied true probability
+            # price = current live market price → the "cost" we pay
+            # Edge exists when traders paid less than current price (or vice-versa).
+            p=entry.avg_trader_price,
             price=entry.yes_price,
             conviction_multiplier=decision.conviction.multiplier,
             kalshi_multiplier=kalshi_result.multiplier,
@@ -316,8 +359,9 @@ def run_once(
             stop_manager.close_position(slug)
             continue
 
-        # Use avg_price as a proxy for current price if no live feed yet
-        current_price = pos.avg_price
+        # Fetch live YES price from Gamma API metadata (already cached).
+        # Fall back to avg_price only if the token price is unavailable.
+        current_price = _extract_yes_price(metadata, pos.avg_price)
         stop_result = stop_manager.update(slug, current_price)
 
         if stop_result.should_close:
@@ -328,6 +372,18 @@ def run_once(
                 logger.info(
                     f"[MAIN] Trailing stop triggered: {slug}  P&L=${pnl:,.2f}"
                 )
+                # Update the Obsidian trade note with final outcome and P&L
+                title_for_note = _market_title(metadata) or slug
+                updated = update_trade_outcome(
+                    market_title=title_for_note,
+                    outcome="closed",
+                    pnl=pnl,
+                    market_id=slug,
+                )
+                if not updated:
+                    logger.warning(
+                        f"[MAIN] Could not find Obsidian note for {slug} to update outcome"
+                    )
 
     logger.info(
         f"Run complete — bankroll=${portfolio.bankroll:,.2f}  "
@@ -345,7 +401,11 @@ def maybe_write_daily_summary(
     portfolio: Portfolio,
     last_summary_date: date,
 ) -> date:
-    """Generate and write the JARVIS daily report if the date has rolled over."""
+    """Generate and write the JARVIS daily report if the date has rolled over.
+
+    When the report is written the session accumulators are cleared in-place
+    so the main loop starts fresh for the new day without a separate reset step.
+    """
     today = date.today()
     if today <= last_summary_date:
         return last_summary_date
@@ -366,6 +426,14 @@ def maybe_write_daily_summary(
         report_date=last_summary_date,
     )
     logger.info(f"[MAIN] Daily report written for {last_summary_date}")
+
+    # Reset accumulators in-place for the new calendar day.
+    # We clear here (not in main()) because after we return `today`,
+    # the caller sets last_summary_date = today and the old
+    # `if date.today() > last_summary_date` guard would always be False.
+    session_trades.clear()
+    session_skips.clear()
+    session_flags.clear()
     return today
 
 
@@ -414,11 +482,8 @@ def main() -> None:
                 session_trades, session_skips, session_flags,
                 portfolio, last_summary_date,
             )
-            # Reset accumulators on day rollover
-            if date.today() > last_summary_date:
-                session_trades.clear()
-                session_skips.clear()
-                session_flags.clear()
+            # Note: accumulators are cleared inside maybe_write_daily_summary()
+            # when the date rolls over — no separate reset needed here.
         except Exception as exc:
             logger.exception(f"Unhandled error in run loop: {exc}")
 
