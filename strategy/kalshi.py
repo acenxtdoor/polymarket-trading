@@ -125,6 +125,9 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
     Returns:
         KalshiResult with signal, multiplier, and match metadata.
     """
+    if not config.KALSHI_ENABLED:
+        return KalshiResult(signal=NO_MATCH, multiplier=_MULTIPLIERS[NO_MATCH])
+
     if not (0.0 < polymarket_price < 1.0):
         logger.warning(f"[KALSHI] Invalid polymarket_price={polymarket_price} — must be (0, 1)")
         return KalshiResult(signal=NO_MATCH, multiplier=_MULTIPLIERS[NO_MATCH])

@@ -18,6 +18,8 @@ MIN_HOURS_TO_CLOSE = 24
 MAX_DAYS_TO_CLOSE = 30
 
 KALSHI_CACHE_TTL = 600         # 10 minutes
+KALSHI_ENABLED = False         # set True + add KALSHI_API_KEY once you have credentials
+KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
 KALSHI_MATCH_THRESHOLD = 0.40  # minimum title similarity to consider a match
 KALSHI_AGREE_MULTIPLIER = 1.5
 KALSHI_DISAGREE_MULTIPLIER = 0.0
