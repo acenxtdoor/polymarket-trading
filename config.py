@@ -28,7 +28,7 @@ REQUEST_TIMEOUT = 10
 
 # Execution / portfolio
 DRY_RUN = True                 # paper trading — no real orders are ever placed
-INITIAL_BANKROLL = 10_000.0    # starting paper bankroll in USDC
+INITIAL_BANKROLL = 1000.0    # starting paper bankroll in USDC
 PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", "portfolio.json")
 
 # Intelligence layer (JARVIS)
