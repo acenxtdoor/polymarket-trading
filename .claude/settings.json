@@ -1,14 +1,14 @@
 {
   "hooks": {
-    "PostToolUse": [
+    "Stop": [
       {
-        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/update_readme_tests.py",
+            "command": "cd \"C:\\Users\\aadha\\OneDrive\\Claude Projects\\Claude Code\\polymarket-trading\" && git add -A && git push",
             "shell": "powershell",
-            "statusMessage": "Updating README test list..."
+            "statusMessage": "Pushing changes to GitHub...",
+            "async": true
           }
         ]
       }

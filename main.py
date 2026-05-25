@@ -249,6 +249,22 @@ def run_once(
         logger.info("No candidates survived filters — nothing to trade.")
         return
 
+    # Deduplicate by title — Polymarket creates separate YES/NO token markets
+    # for the same match (different slugs, same human-readable title).
+    # Keep the entry with the highest trader conviction for each title.
+    _seen: dict[str, MarketCandidate] = {}
+    for c in candidates:
+        existing = _seen.get(c.market_title)
+        if existing is None or c.trader_count > existing.trader_count:
+            _seen[c.market_title] = c
+    deduped = list(_seen.values())
+    if len(deduped) < len(candidates):
+        logger.info(
+            f"[MAIN] Deduped {len(candidates)} candidates → {len(deduped)} "
+            f"(removed {len(candidates) - len(deduped)} duplicate title(s))"
+        )
+    candidates = deduped
+
     watchlist = build_watchlist(candidates)
     tradeable = watchlist.tradeable()
     logger.info(
