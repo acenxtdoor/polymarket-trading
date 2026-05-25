@@ -31,12 +31,13 @@ def fetch_top_traders() -> list[Trader]:
     rows = get_leaderboard(limit=100)
     traders = []
     for row in rows:
-        volume = float(row.get("volume", 0) or 0)
+        # v1/leaderboard uses: proxyWallet, userName, vol, pnl
+        volume = float(row.get("vol") or row.get("volume") or 0)
         if volume <= MIN_TRADER_VOLUME:
             continue
         traders.append(Trader(
-            address=row.get("address") or row.get("wallet") or "",
-            username=row.get("name") or row.get("username") or "unknown",
+            address=row.get("proxyWallet") or row.get("address") or row.get("wallet") or "",
+            username=row.get("userName") or row.get("name") or row.get("username") or "unknown",
             volume=volume,
             pnl=float(row.get("pnl", 0) or 0),
         ))
@@ -58,8 +59,8 @@ def get_trader_signals(trader: Trader) -> list[TradeSignal]:
         side = (trade.get("side") or "").upper()
         if side != "BUY":
             continue
-        slug = trade.get("market") or trade.get("slug") or ""
-        token_id = trade.get("asset_id") or trade.get("token_id") or ""
+        slug = trade.get("slug") or trade.get("market") or ""
+        token_id = trade.get("asset") or trade.get("asset_id") or trade.get("token_id") or ""
         outcome = trade.get("outcome") or "YES"
         price = float(trade.get("price", 0) or 0)
         if not slug or not token_id or price <= 0:

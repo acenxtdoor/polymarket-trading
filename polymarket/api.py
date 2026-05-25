@@ -40,15 +40,19 @@ def get_markets(limit: int = 100, offset: int = 0) -> list:
 
 def get_leaderboard(limit: int = 50) -> list:
     """Fetch top traders from the Data API leaderboard."""
-    data = _get(f"{DATA_BASE_URL}/leaderboard", params={"limit": limit})
+    data = _get(f"{DATA_BASE_URL}/v1/leaderboard", params={"limit": limit})
+    if isinstance(data, list):
+        return data
     if isinstance(data, dict):
         return data.get("data", data.get("results", []))
-    return data or []
+    return []
 
 
 def get_trader_trades(address: str, limit: int = 50) -> list:
-    """Fetch recent trades for a trader address from the CLOB API."""
-    data = _get(f"{CLOB_BASE_URL}/trades", params={"maker_address": address, "limit": limit})
+    """Fetch recent trades for a trader address from the Data API."""
+    data = _get(f"{DATA_BASE_URL}/trades", params={"user": address, "limit": limit})
+    if isinstance(data, list):
+        return data
     if isinstance(data, dict):
         return data.get("data", data.get("results", []))
-    return data or []
+    return []
