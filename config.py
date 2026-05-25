@@ -9,6 +9,7 @@ MIN_TRADER_VOLUME = 0  # volume > $0
 
 MAX_POSITION_PCT = 0.10        # 10% of bankroll
 TRAILING_STOP_PCT = 0.10       # 10% below peak
+KELLY_MIN_EDGE = 0.04          # assumed edge when live price = trader avg price (Gamma API gap)
 KALSHI_AGREEMENT_THRESHOLD = 0.05
 MAX_SLIPPAGE_PCT = 0.03
 
@@ -44,7 +45,7 @@ INTELLIGENCE_WORKERS = 4  # parallel Claude calls
 # Only consider markets resolving inside this near-term window (hours).
 WATCHLIST_MIN_RESOLUTION_HOURS = 24        # skip markets resolving sooner than this
 WATCHLIST_MAX_RESOLUTION_HOURS = 7 * 24    # skip markets resolving later than ~1 week
-WATCHLIST_MIN_SCORE = 50.0                 # bot trades entries scoring at/above this
+WATCHLIST_MIN_SCORE = 30.0                 # bot trades entries scoring at/above this
 
 # Score = base(confidence) + conviction bonus + Kalshi-agree bonus, clamped to 0–100.
 # confidence == "skip" or Kalshi "disagree" force the score to 0 (excluded).

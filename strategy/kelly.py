@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config import MAX_POSITION_PCT
+from config import MAX_POSITION_PCT, KELLY_MIN_EDGE
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,10 +52,22 @@ def position_size(
         logger.warning(f"Invalid bankroll: {bankroll}")
         return 0.0
 
-    f = kelly_fraction(p, price)
+    # When the Gamma API has no live token price, avg_trader_price and yes_price
+    # collapse to the same value and Kelly returns 0.  Apply a minimum assumed
+    # edge so copy-trading signals still produce a position — traders are buying
+    # because they believe the true probability exceeds the market price.
+    effective_p = p
+    if abs(p - price) < 1e-6:
+        effective_p = min(p + KELLY_MIN_EDGE, 0.97)
+        logger.info(
+            f"Kelly: p≈price ({p:.3f}), applying min edge +{KELLY_MIN_EDGE:.0%} "
+            f"→ effective_p={effective_p:.3f}"
+        )
+
+    f = kelly_fraction(effective_p, price)
     if f <= 0.0:
         logger.info(
-            f"Kelly fraction={f:.4f} (no edge): p={p:.3f} price={price:.3f} — skipping"
+            f"Kelly fraction={f:.4f} (no edge): p={effective_p:.3f} price={price:.3f} — skipping"
         )
         return 0.0
 
