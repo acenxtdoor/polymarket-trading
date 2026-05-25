@@ -1,0 +1,433 @@
+"""
+main.py — JARVIS Polymarket copy-trading bot (Step 10)
+======================================================
+Entry point. Wires every completed step into a single event loop:
+
+  1. Load .env → validate keys
+  2. Init Portfolio, MarketFilter, TrailingStopManager, OrderExecutor
+  3. Loop every LOOP_INTERVAL seconds:
+       a. Fetch top traders → collect BUY signals
+       b. Aggregate by market (conviction engine) → ConsensusDecision list
+       c. Quality-filter candidates (MarketFilter.is_tradeable)
+       d. Fetch news, get Kalshi signals → MarketCandidate list
+       e. Build JARVIS watchlist (parallel Claude assessment + scoring)
+       f. For each tradeable entry → Kelly size → execute buy → Obsidian note
+       g. Check trailing stops on open positions → execute sells
+       h. After 24 h → generate JARVIS daily summary → Obsidian daily report
+
+Run:
+    python main.py
+
+Environment variables (set in .env):
+    ANTHROPIC_API_KEY   — Claude API key (optional; JARVIS offline without it)
+    NEWSAPI_KEY         — NewsAPI.org key (optional; news disabled without it)
+    OBSIDIAN_VAULT_PATH — path to your Obsidian vault
+    PORTFOLIO_PATH      — where portfolio.json is saved (default: portfolio.json)
+    LOOP_INTERVAL       — seconds between bot runs (default: 300)
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import sys
+import time
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+
+# ── 1. Load .env before any os.getenv call ────────────────────────────────────
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader — no third-party dependency required."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for raw in p.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        os.environ.setdefault(key.strip(), val.strip())
+
+
+_load_dotenv()
+
+# ── 2. Project imports (after env vars are set) ───────────────────────────────
+
+import config
+from execution.order import OrderExecutor
+from execution.portfolio import Portfolio
+from intelligence.summarizer import DailySummaryInput, generate_daily_summary
+from intelligence.watchlist import MarketCandidate, build_watchlist
+from news.newsapi import fetch_market_news
+from obsidian.writer import ensure_vault, write_daily_report, write_skip, write_trade
+from polymarket.traders import collect_all_signals, fetch_top_traders
+from strategy.conviction import ConvictionEngine, SignalAggregator
+from strategy.kalshi import get_kalshi_signal
+from strategy.kelly import position_size
+from strategy.market_filter import MarketFilter
+from strategy.trailing_stop import TrailingStopManager
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+LOOP_INTERVAL: int = int(os.getenv("LOOP_INTERVAL", "300"))
+
+
+# ── 3. Helpers ────────────────────────────────────────────────────────────────
+
+def _market_title(metadata: dict) -> str:
+    """Extract a human-readable title from Polymarket market metadata."""
+    for key in ("question", "title", "description", "slug"):
+        val = metadata.get(key)
+        if val and isinstance(val, str):
+            return val
+    return "Unknown market"
+
+
+def _hours_to_close(metadata: dict) -> float:
+    """Hours until market resolution (negative = already closed)."""
+    from strategy.market_filter import _parse_close_time
+    close_dt = _parse_close_time(metadata)
+    if close_dt is None:
+        return 0.0
+    return (close_dt - datetime.now(tz=timezone.utc)).total_seconds() / 3600
+
+
+def _validate_env() -> None:
+    """Warn about missing optional keys; abort if nothing useful can run."""
+    if not config.ANTHROPIC_API_KEY:
+        logger.warning(
+            "ANTHROPIC_API_KEY not set — JARVIS intelligence offline. "
+            "Bot will trade on signals alone."
+        )
+    if not config.NEWSAPI_KEY:
+        logger.warning("NEWSAPI_KEY not set — news enrichment disabled.")
+    if config.DRY_RUN:
+        logger.info("DRY_RUN=True — no real orders will be placed.")
+
+
+# ── 4. Single-loop execution ──────────────────────────────────────────────────
+
+def run_once(
+    aggregator: SignalAggregator,
+    engine: ConvictionEngine,
+    market_filter: MarketFilter,
+    portfolio: Portfolio,
+    executor: OrderExecutor,
+    stop_manager: TrailingStopManager,
+    session_trades: list[dict],
+    session_skips: list[dict],
+    session_flags: list[str],
+) -> None:
+    """Execute one full iteration of the bot loop."""
+
+    # ── a. Fetch traders + signals ────────────────────────────────────────
+    logger.info("=" * 60)
+    logger.info("JARVIS — new run starting")
+    try:
+        traders = fetch_top_traders()
+    except Exception as exc:
+        logger.error(f"Could not fetch top traders: {exc}")
+        return
+
+    signals = collect_all_signals(traders)
+    if not signals:
+        logger.info("No buy signals found this run.")
+        return
+
+    # ── b. Conviction aggregation ─────────────────────────────────────────
+    decisions = aggregator.process(
+        signals,
+        engine,
+        base_kelly_size=position_size(
+            portfolio.bankroll, p=0.60, price=0.55
+        ),
+        bankroll=portfolio.bankroll,
+    )
+    actionable = [d for d in decisions if d.conviction.execute]
+    logger.info(
+        f"{len(decisions)} market(s) in conviction flow, "
+        f"{len(actionable)} ready to assess"
+    )
+
+    # ── c. Quality filter + candidate assembly ────────────────────────────
+    candidates: list[MarketCandidate] = []
+    for decision in actionable:
+        slug = decision.market_slug
+        if not market_filter.is_tradeable(slug):
+            session_skips.append({
+                "market_title": slug,
+                "skip_reason": "failed market quality filter",
+            })
+            continue
+
+        metadata = market_filter.get_market_metadata(slug) or {}
+        title = _market_title(metadata)
+        agg = decision.aggregated
+        yes_price = agg.price
+        trader_count = agg.trader_count
+        avg_price = agg.price
+
+        # ── d. News + Kalshi ──────────────────────────────────────────────
+        articles = fetch_market_news(title)
+        kalshi_result = get_kalshi_signal(title, yes_price)
+
+        if kalshi_result.multiplier == 0.0:
+            logger.info(f"[MAIN] {slug}: Kalshi disagrees — skip")
+            session_skips.append({
+                "market_title": title,
+                "skip_reason": "Kalshi disagrees",
+            })
+            write_skip(
+                market_id=slug,
+                market_title=title,
+                skip_reason="Kalshi disagrees",
+                conviction=trader_count,
+                kalshi_signal=kalshi_result.signal,
+                claude_confidence="skip",
+                claude_summary="Kalshi hard-disagrees with Polymarket signal. Bot rule: skip.",
+                claude_flags=["Kalshi disagree veto"],
+                traders=[s.trader.username for s in agg.signals],
+            )
+            continue
+
+        candidates.append(MarketCandidate(
+            market_id=slug,
+            market_title=title,
+            yes_price=yes_price,
+            trader_count=trader_count,
+            avg_trader_price=avg_price,
+            kalshi_signal=kalshi_result.signal,
+            hours_to_resolution=_hours_to_close(metadata),
+            articles=articles,
+        ))
+
+    # ── e. JARVIS watchlist ───────────────────────────────────────────────
+    if not candidates:
+        logger.info("No candidates survived filters — nothing to trade.")
+        return
+
+    watchlist = build_watchlist(candidates)
+    tradeable = watchlist.tradeable()
+    logger.info(
+        f"Watchlist: {len(watchlist.entries)} assessed, "
+        f"{len(tradeable)} tradeable (score ≥ {config.WATCHLIST_MIN_SCORE})"
+    )
+
+    # Write skipped entries (below min score) to Obsidian
+    for entry in watchlist.entries:
+        if entry.score < config.WATCHLIST_MIN_SCORE:
+            session_skips.append({
+                "market_title": entry.market_title,
+                "skip_reason": f"JARVIS score {entry.score:.0f} below threshold",
+            })
+            if entry.flags:
+                session_flags.extend(entry.flags)
+            write_skip(
+                market_id=entry.market_id,
+                market_title=entry.market_title,
+                skip_reason=f"JARVIS score {entry.score:.0f} below {config.WATCHLIST_MIN_SCORE}",
+                conviction=entry.trader_count,
+                kalshi_signal=entry.kalshi_signal,
+                claude_confidence=entry.confidence,
+                claude_summary=entry.summary,
+                claude_flags=entry.flags,
+                traders=[],
+            )
+
+    # ── f. Execute buys ───────────────────────────────────────────────────
+    for entry in tradeable:
+        if portfolio.has_position(entry.market_id):
+            logger.info(f"[MAIN] {entry.market_id}: already holding position — skip")
+            continue
+
+        # Find the matching decision for token_id + Kelly inputs
+        decision = next(
+            (d for d in actionable if d.market_slug == entry.market_id), None
+        )
+        if decision is None:
+            continue
+
+        agg = decision.aggregated
+        token_id = agg.signals[0].token_id if agg.signals else ""
+        outcome = agg.signals[0].outcome if agg.signals else "YES"
+
+        kalshi_result = get_kalshi_signal(entry.market_title, entry.yes_price)
+        size = position_size(
+            bankroll=portfolio.bankroll,
+            p=entry.yes_price,
+            price=entry.yes_price,
+            conviction_multiplier=decision.conviction.multiplier,
+            kalshi_multiplier=kalshi_result.multiplier,
+        )
+        if size <= 0:
+            logger.info(f"[MAIN] {entry.market_id}: Kelly size=0 — no edge, skip")
+            continue
+
+        result = executor.buy(
+            market_slug=entry.market_id,
+            token_id=token_id,
+            outcome=outcome,
+            price=entry.yes_price,
+            size_dollars=size,
+        )
+
+        if result.filled:
+            stop_manager.open_position(entry.market_id, result.fill_price)
+            kelly_f = size / portfolio.bankroll if portfolio.bankroll > 0 else 0
+            session_trades.append({
+                "market_title": entry.market_title,
+                "action": "BUY",
+                "conviction": entry.trader_count,
+                "kelly_fraction": kelly_f,
+                "entry_price": result.fill_price,
+                "claude_confidence": entry.confidence,
+            })
+            if entry.flags:
+                session_flags.extend(entry.flags)
+            write_trade(
+                market_id=entry.market_id,
+                market_title=entry.market_title,
+                action="BUY",
+                conviction=entry.trader_count,
+                kalshi_signal=entry.kalshi_signal,
+                kelly_fraction=kelly_f,
+                position_size=size,
+                entry_price=result.fill_price,
+                claude_confidence=entry.confidence,
+                claude_summary=entry.summary,
+                claude_flags=entry.flags,
+                traders=[s.trader.username for s in agg.signals],
+            )
+        else:
+            session_skips.append({
+                "market_title": entry.market_title,
+                "skip_reason": result.reason,
+            })
+
+    # ── g. Trailing stop checks ───────────────────────────────────────────
+    open_slugs = list(stop_manager.open_positions.keys())
+    for slug in open_slugs:
+        metadata = market_filter.get_market_metadata(slug) or {}
+        pos = portfolio.get_position(slug)
+        if pos is None:
+            stop_manager.close_position(slug)
+            continue
+
+        # Use avg_price as a proxy for current price if no live feed yet
+        current_price = pos.avg_price
+        stop_result = stop_manager.update(slug, current_price)
+
+        if stop_result.should_close:
+            sell_result = executor.sell(slug, current_price)
+            if sell_result.filled:
+                stop_manager.close_position(slug)
+                pnl = sell_result.size_dollars - pos.cost
+                logger.info(
+                    f"[MAIN] Trailing stop triggered: {slug}  P&L=${pnl:,.2f}"
+                )
+
+    logger.info(
+        f"Run complete — bankroll=${portfolio.bankroll:,.2f}  "
+        f"open={portfolio.open_count}  "
+        f"realized P&L=${portfolio.realized_pnl:,.2f}"
+    )
+
+
+# ── 5. Daily summary ──────────────────────────────────────────────────────────
+
+def maybe_write_daily_summary(
+    session_trades: list[dict],
+    session_skips: list[dict],
+    session_flags: list[str],
+    portfolio: Portfolio,
+    last_summary_date: date,
+) -> date:
+    """Generate and write the JARVIS daily report if the date has rolled over."""
+    today = date.today()
+    if today <= last_summary_date:
+        return last_summary_date
+
+    logger.info("[MAIN] Generating daily JARVIS summary...")
+    summary_text = generate_daily_summary(DailySummaryInput(
+        trades_placed=session_trades,
+        trades_skipped=session_skips,
+        flags_raised=list(set(session_flags)),
+        bankroll=portfolio.bankroll,
+        run_date=last_summary_date,
+    ))
+    write_daily_report(
+        summary_text=summary_text,
+        trades_count=len(session_trades),
+        skipped_count=len(session_skips),
+        bankroll=portfolio.bankroll,
+        report_date=last_summary_date,
+    )
+    logger.info(f"[MAIN] Daily report written for {last_summary_date}")
+    return today
+
+
+# ── 6. Main ───────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    _validate_env()
+    ensure_vault()
+
+    # Shared state
+    portfolio = Portfolio()
+    market_filter = MarketFilter()
+    stop_manager = TrailingStopManager()
+    executor = OrderExecutor(portfolio, market_filter)
+    aggregator = SignalAggregator()
+    engine = ConvictionEngine()
+
+    # Graceful shutdown on Ctrl+C / SIGTERM
+    running = True
+    def _shutdown(sig, frame):  # noqa: ANN001
+        nonlocal running
+        logger.info("Shutdown signal received — finishing current run then exiting.")
+        running = False
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # Per-session accumulators (reset each calendar day)
+    session_trades: list[dict] = []
+    session_skips: list[dict] = []
+    session_flags: list[str] = []
+    last_summary_date: date = date.today()
+
+    logger.info(
+        f"JARVIS bot started — interval={LOOP_INTERVAL}s  "
+        f"dry_run={config.DRY_RUN}  bankroll=${portfolio.bankroll:,.2f}"
+    )
+
+    while running:
+        try:
+            run_once(
+                aggregator, engine, market_filter,
+                portfolio, executor, stop_manager,
+                session_trades, session_skips, session_flags,
+            )
+            last_summary_date = maybe_write_daily_summary(
+                session_trades, session_skips, session_flags,
+                portfolio, last_summary_date,
+            )
+            # Reset accumulators on day rollover
+            if date.today() > last_summary_date:
+                session_trades.clear()
+                session_skips.clear()
+                session_flags.clear()
+        except Exception as exc:
+            logger.exception(f"Unhandled error in run loop: {exc}")
+
+        if running:
+            logger.info(f"Sleeping {LOOP_INTERVAL}s until next run...")
+            time.sleep(LOOP_INTERVAL)
+
+    logger.info("JARVIS bot stopped.")
+
+
+if __name__ == "__main__":
+    main()
