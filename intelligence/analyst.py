@@ -116,7 +116,7 @@ def assess_market(
             model="claude-opus-4-7",
             max_tokens=512,
             thinking={"type": "adaptive"},
-            output_config={"format": {"type": "json_schema", "json_schema": {"name": "assessment", "schema": _SCHEMA}}},
+            output_config={"format": {"type": "json_schema", "name": "assessment", "schema": _SCHEMA}},
             system=[
                 {
                     "type": "text",
