@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"C:\\Users\\aadha\\OneDrive\\Claude Projects\\Claude Code\\polymarket-trading\" && git add -A && git push",
+            "command": "cd \"C:\\Users\\aadha\\OneDrive\\Claude Projects\\Claude Code\\polymarket-trading\" && git add -A && git diff --cached --quiet || git commit -m \"Auto-commit by JARVIS Stop hook\" && git push",
             "shell": "powershell",
             "statusMessage": "Pushing changes to GitHub...",
             "async": true

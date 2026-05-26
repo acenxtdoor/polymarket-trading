@@ -203,22 +203,23 @@ SORT date DESC
 LIMIT 30
 ```
 
-## Skipped Trades
+## Skipped Trades (Today)
 
 ```dataview
-TABLE market_title, date, skip_reason, claude_confidence, conviction
+TABLE market_title, skip_reason, claude_confidence, conviction
 FROM "Skipped"
-SORT date DESC
+WHERE date = date(today)
+SORT file.mtime DESC
 LIMIT 20
 ```
 
-## JARVIS Flags
+## JARVIS Flags (Today)
 
 ```dataview
-TABLE market_title, date, claude_flags
+TABLE market_title, claude_flags
 FROM "Trades" OR "Skipped"
-WHERE claude_flags != []
-SORT date DESC
+WHERE claude_flags != [] AND date = date(today)
+SORT file.mtime DESC
 ```
 
 ## Daily Reports
