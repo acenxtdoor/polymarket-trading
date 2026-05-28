@@ -42,3 +42,10 @@ portfolio.json
 # OS
 .DS_Store
 Thumbs.db
+*.lnk
+
+# Obsidian vault — live notes must never be committed
+# The vault lives outside the repo; block any accidental inclusion
+Trading Journal/
+Trading Journal - Shortcut.lnk
+C:\Users\
