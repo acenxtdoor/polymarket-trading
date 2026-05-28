@@ -20,13 +20,26 @@ def _get(url: str, params: dict = None) -> dict | list | None:
         return None
 
 
-def get_market(slug: str) -> dict | None:
-    """Fetch market metadata from Gamma API by slug."""
+def get_market(slug: str, token_id: str | None = None) -> dict | None:
+    """Fetch market metadata from Gamma API by slug, with token_id fallback.
+
+    The slug in trader-trade responses is often a short event-level slug that
+    doesn't match Gamma's question-level slug.  When the slug lookup returns
+    nothing, we retry via the token_id (which Gamma always resolves correctly).
+    """
     data = _get(f"{GAMMA_BASE_URL}/markets", params={"slug": slug})
     if isinstance(data, list) and len(data) > 0:
         return data[0]
     if isinstance(data, dict):
         return data
+    # Fallback: look up by token_id — always resolves in Gamma API
+    if token_id:
+        logger.debug(f"get_market: slug '{slug}' not found, retrying by token_id")
+        data = _get(f"{GAMMA_BASE_URL}/markets", params={"token_id": token_id})
+        if isinstance(data, list) and len(data) > 0:
+            return data[0]
+        if isinstance(data, dict):
+            return data
     return None
 
 

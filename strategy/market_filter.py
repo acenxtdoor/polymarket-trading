@@ -54,17 +54,17 @@ class MarketFilter:
     def __init__(self) -> None:
         self._cache: TTLCache = TTLCache(ttl=MARKET_CACHE_TTL)
 
-    def get_market_metadata(self, slug: str) -> dict | None:
+    def get_market_metadata(self, slug: str, token_id: str | None = None) -> dict | None:
         cached = self._cache.get(slug)
         if cached is not None:
             return cached
-        meta = get_market(slug)
+        meta = get_market(slug, token_id=token_id)
         if meta is not None:
             self._cache.set(slug, meta)
         return meta
 
-    def is_tradeable(self, slug: str) -> bool:
-        meta = self.get_market_metadata(slug)
+    def is_tradeable(self, slug: str, token_id: str | None = None) -> bool:
+        meta = self.get_market_metadata(slug, token_id=token_id)
 
         if meta is None:
             logger.info(f"[REJECT] {slug}: could not fetch metadata")

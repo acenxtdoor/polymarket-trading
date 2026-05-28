@@ -176,7 +176,13 @@ def run_once(
     candidates: list[MarketCandidate] = []
     for decision in actionable:
         slug = decision.market_slug
-        if not market_filter.is_tradeable(slug):
+        # Pull the token_id from the first signal — used as Gamma API fallback when
+        # the event-level slug doesn't resolve to a Gamma question-level market.
+        _first_token_id = (
+            decision.aggregated.signals[0].token_id
+            if decision.aggregated.signals else None
+        )
+        if not market_filter.is_tradeable(slug, token_id=_first_token_id):
             # Fetch cached metadata for a better title (already in cache from is_tradeable)
             _meta = market_filter.get_market_metadata(slug) or {}
             _title = _market_title(_meta) or slug
@@ -197,7 +203,7 @@ def run_once(
             )
             continue
 
-        metadata = market_filter.get_market_metadata(slug) or {}
+        metadata = market_filter.get_market_metadata(slug, token_id=_first_token_id) or {}
         title = _market_title(metadata)
         agg = decision.aggregated
         # avg_trader_price: weighted avg price top traders paid — used as estimated true probability
