@@ -376,14 +376,17 @@ def run_once(
     # ── g. Trailing stop checks ───────────────────────────────────────────
     open_slugs = list(stop_manager.open_positions.keys())
     for slug in open_slugs:
-        metadata = market_filter.get_market_metadata(slug) or {}
+        # Fetch position first so we have token_id for the metadata lookup.
         pos = portfolio.get_position(slug)
         if pos is None:
             stop_manager.close_position(slug)
             continue
 
-        # Fetch live price via CLOB /midpoint (public, no auth, always fresh).
-        # Fall back to Gamma API token price, then entry price as last resort.
+        # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
+        metadata = market_filter.get_market_metadata(slug, token_id=pos.token_id) or {}
+
+        # Fetch live price: Gamma API bestBid/bestAsk midpoint via token_id,
+        # then fall back to the YES token price embedded in market metadata.
         current_price = (
             get_token_price(pos.token_id)
             or _extract_yes_price(metadata, pos.avg_price)
@@ -391,14 +394,18 @@ def run_once(
         stop_result = stop_manager.update(slug, current_price)
 
         if stop_result.should_close:
+            # Capture cost before executor.sell() removes the position from portfolio.
+            pos_cost = pos.cost
+            pos_avg_price = pos.avg_price
             sell_result = executor.sell(slug, current_price)
             if sell_result.filled:
                 stop_manager.close_position(slug)
-                pnl = sell_result.size_dollars - pos.cost
+                pnl = sell_result.size_dollars - pos_cost
                 logger.info(
                     f"[MAIN] Trailing stop triggered: {slug}  P&L=${pnl:,.2f}"
                 )
-                # Update the Obsidian trade note with final outcome and P&L
+                # Update the Obsidian trade note with final outcome and P&L.
+                # title_for_note uses real metadata (now fetched with token_id fallback).
                 title_for_note = _market_title(metadata) or slug
                 updated = update_trade_outcome(
                     market_title=title_for_note,
@@ -407,8 +414,29 @@ def run_once(
                     market_id=slug,
                 )
                 if not updated:
+                    # Note not found (e.g. dashboard was cleared but portfolio wasn't reset).
+                    # Create a new closed-trade note so the dashboard P&L stays accurate.
                     logger.warning(
-                        f"[MAIN] Could not find Obsidian note for {slug} to update outcome"
+                        f"[MAIN] No Obsidian note found for {slug} — writing new closed note"
+                    )
+                    write_trade(
+                        market_id=slug,
+                        market_title=title_for_note,
+                        action="BUY",
+                        conviction=1,
+                        kalshi_signal="unknown",
+                        kelly_fraction=0.0,
+                        position_size=pos_cost,
+                        entry_price=pos_avg_price,
+                        claude_confidence="unknown",
+                        claude_summary=(
+                            "Position closed by trailing stop. "
+                            "Original trade note was not found (dashboard may have been cleared)."
+                        ),
+                        claude_flags=["Note reconstructed on close"],
+                        traders=[],
+                        outcome="closed",
+                        pnl=pnl,
                     )
 
     logger.info(
