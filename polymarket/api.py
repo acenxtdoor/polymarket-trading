@@ -56,3 +56,21 @@ def get_trader_trades(address: str, limit: int = 50) -> list:
     if isinstance(data, dict):
         return data.get("data", data.get("results", []))
     return []
+
+
+def get_token_price(token_id: str) -> float | None:
+    """Fetch the live midpoint price for a token from the CLOB API.
+
+    Uses the public /midpoint endpoint — no authentication required.
+    Returns a float in (0, 1) or None if unavailable.
+    """
+    data = _get(f"{CLOB_BASE_URL}/midpoint", params={"token_id": token_id})
+    if not isinstance(data, dict):
+        return None
+    try:
+        mid = float(data.get("mid", 0))
+        if 0.0 < mid < 1.0:
+            return mid
+    except (TypeError, ValueError):
+        pass
+    return None

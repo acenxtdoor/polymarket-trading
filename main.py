@@ -62,6 +62,7 @@ from intelligence.summarizer import DailySummaryInput, generate_daily_summary
 from intelligence.watchlist import MarketCandidate, build_watchlist
 from news.newsapi import fetch_market_news
 from obsidian.writer import ensure_vault, update_trade_outcome, write_daily_report, write_skip, write_trade
+from polymarket.api import get_token_price
 from polymarket.traders import collect_all_signals, fetch_top_traders
 from strategy.conviction import ConvictionEngine, SignalAggregator
 from strategy.kalshi import get_kalshi_signal
@@ -375,9 +376,12 @@ def run_once(
             stop_manager.close_position(slug)
             continue
 
-        # Fetch live YES price from Gamma API metadata (already cached).
-        # Fall back to avg_price only if the token price is unavailable.
-        current_price = _extract_yes_price(metadata, pos.avg_price)
+        # Fetch live price via CLOB /midpoint (public, no auth, always fresh).
+        # Fall back to Gamma API token price, then entry price as last resort.
+        current_price = (
+            get_token_price(pos.token_id)
+            or _extract_yes_price(metadata, pos.avg_price)
+        )
         stop_result = stop_manager.update(slug, current_price)
 
         if stop_result.should_close:
