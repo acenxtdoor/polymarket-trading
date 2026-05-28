@@ -7,7 +7,7 @@ DATA_BASE_URL = "https://data-api.polymarket.com"
 TOP_TRADER_COUNT = 10
 MIN_TRADER_VOLUME = 0  # volume > $0
 
-MAX_POSITION_PCT = 0.10        # 10% of bankroll
+MAX_POSITION_PCT = 0.10        # 10% of capital
 TRAILING_STOP_PCT = 0.10       # 10% below peak
 KELLY_MIN_EDGE = 0.04          # assumed edge when live price = trader avg price (Gamma API gap)
 KALSHI_AGREEMENT_THRESHOLD = 0.05
@@ -31,11 +31,12 @@ REQUEST_TIMEOUT = 10
 
 # Execution / portfolio
 DRY_RUN = True                 # paper trading — no real orders are ever placed
-INITIAL_BANKROLL = 1000.0    # starting paper bankroll in USDC
+INITIAL_CAPITAL = 1000.0    # starting paper capital in USDC
 PORTFOLIO_PATH = os.getenv("PORTFOLIO_PATH", "portfolio.json")
 
 # Intelligence layer (JARVIS)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", r"C:\Users\aadha\OneDrive\Trading Journal")
 NEWS_MAX_ARTICLES = 5

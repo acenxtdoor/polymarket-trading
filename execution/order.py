@@ -91,10 +91,10 @@ class OrderExecutor:
 
         if size_dollars <= 0:
             return reject(f"size must be > 0, got {size_dollars}")
-        if size_dollars > self.portfolio.bankroll + 1e-9:
+        if size_dollars > self.portfolio.capital + 1e-9:
             return reject(
-                f"insufficient bankroll: need ${size_dollars:,.2f}, "
-                f"have ${self.portfolio.bankroll:,.2f}"
+                f"insufficient capital: need ${size_dollars:,.2f}, "
+                f"have ${self.portfolio.capital:,.2f}"
             )
 
         try:

@@ -1,9 +1,9 @@
 """
 execution/portfolio.py
 ======================
-Bankroll and position tracking with JSON persistence (Step 8).
+Capital and position tracking with JSON persistence (Step 8).
 
-Tracks available cash (bankroll), open positions, and realized P&L for the
+Tracks available cash (capital), open positions, and realized P&L for the
 paper-trading bot. State is persisted to a JSON file so it survives restarts
 of the main loop.
 
@@ -62,18 +62,18 @@ class Portfolio:
     In-memory portfolio backed by a JSON file.
 
     On construction, loads existing state from `path` if the file exists;
-    otherwise starts fresh with `initial_bankroll`. Every mutation persists
+    otherwise starts fresh with `initial_capital`. Every mutation persists
     to disk immediately.
     """
 
     def __init__(
         self,
         path: str | Path | None = None,
-        initial_bankroll: float | None = None,
+        initial_capital: float | None = None,
     ) -> None:
         self.path = Path(path) if path is not None else Path(config.PORTFOLIO_PATH)
-        self.bankroll: float = (
-            initial_bankroll if initial_bankroll is not None else config.INITIAL_BANKROLL
+        self.capital: float = (
+            initial_capital if initial_capital is not None else config.INITIAL_CAPITAL
         )
         self.realized_pnl: float = 0.0
         self.positions: dict[str, Position] = {}
@@ -81,13 +81,13 @@ class Portfolio:
         if self.path.exists():
             self._load()
             logger.info(
-                f"[PORTFOLIO] loaded {self.path}: bankroll=${self.bankroll:,.2f}, "
+                f"[PORTFOLIO] loaded {self.path}: capital=${self.capital:,.2f}, "
                 f"{len(self.positions)} open position(s), "
                 f"realized P&L=${self.realized_pnl:,.2f}"
             )
         else:
             logger.info(
-                f"[PORTFOLIO] new portfolio: bankroll=${self.bankroll:,.2f}"
+                f"[PORTFOLIO] new portfolio: capital=${self.capital:,.2f}"
             )
 
     # ── Mutations ────────────────────────────────────────────────────────────
@@ -105,15 +105,15 @@ class Portfolio:
 
         Raises:
             ValueError: if dollars <= 0, fill_price not in (0, 1), or there is
-                        not enough bankroll to cover the order.
+                        not enough capital to cover the order.
         """
         if dollars <= 0:
             raise ValueError(f"dollars must be > 0, got {dollars}")
         if not (0.0 < fill_price < 1.0):
             raise ValueError(f"fill_price must be in (0, 1), got {fill_price}")
-        if dollars > self.bankroll + 1e-9:
+        if dollars > self.capital + 1e-9:
             raise ValueError(
-                f"insufficient bankroll: need ${dollars:,.2f}, have ${self.bankroll:,.2f}"
+                f"insufficient capital: need ${dollars:,.2f}, have ${self.capital:,.2f}"
             )
 
         shares = dollars / fill_price
@@ -134,12 +134,12 @@ class Portfolio:
             pos.cost += dollars
             pos.avg_price = pos.cost / pos.shares
 
-        self.bankroll -= dollars
+        self.capital -= dollars
         self.save()
         logger.info(
             f"[PORTFOLIO] BUY  {market_slug} {outcome}  "
             f"+{shares:.2f} shares @ {fill_price:.4f}  cost=${dollars:,.2f}  "
-            f"bankroll=${self.bankroll:,.2f}"
+            f"capital=${self.capital:,.2f}"
         )
         return pos
 
@@ -161,13 +161,13 @@ class Portfolio:
 
         proceeds = pos.shares * exit_price
         pnl = proceeds - pos.cost
-        self.bankroll += proceeds
+        self.capital += proceeds
         self.realized_pnl += pnl
         del self.positions[market_slug]
         self.save()
         logger.info(
             f"[PORTFOLIO] SELL {market_slug}  {pos.shares:.2f} shares @ {exit_price:.4f}  "
-            f"proceeds=${proceeds:,.2f}  P&L=${pnl:,.2f}  bankroll=${self.bankroll:,.2f}"
+            f"proceeds=${proceeds:,.2f}  P&L=${pnl:,.2f}  capital=${self.capital:,.2f}"
         )
         return pnl
 
@@ -188,13 +188,13 @@ class Portfolio:
         )
 
     def equity(self, prices: dict[str, float]) -> float:
-        """Bankroll plus market value of all priced open positions."""
+        """Capital plus market value of all priced open positions."""
         held = sum(
             pos.market_value(prices[slug])
             for slug, pos in self.positions.items()
             if slug in prices
         )
-        return self.bankroll + held
+        return self.capital + held
 
     @property
     def open_count(self) -> int:
@@ -204,7 +204,7 @@ class Portfolio:
 
     def save(self) -> None:
         data = {
-            "bankroll": self.bankroll,
+            "capital": self.capital,
             "realized_pnl": self.realized_pnl,
             "positions": {slug: asdict(pos) for slug, pos in self.positions.items()},
         }
@@ -212,7 +212,10 @@ class Portfolio:
 
     def _load(self) -> None:
         data = json.loads(self.path.read_text(encoding="utf-8"))
-        self.bankroll = float(data["bankroll"])
+        # Back-compat: portfolios saved before the bankroll→capital rename used
+        # the "bankroll" key. Read it if "capital" is absent; the next save()
+        # rewrites the file with the new key.
+        self.capital = float(data["capital"] if "capital" in data else data["bankroll"])
         self.realized_pnl = float(data.get("realized_pnl", 0.0))
         self.positions = {
             slug: Position(**pos) for slug, pos in data.get("positions", {}).items()

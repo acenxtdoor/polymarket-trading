@@ -122,7 +122,7 @@ def write_daily_report(
     summary_text: str,
     trades_count: int,
     skipped_count: int,
-    bankroll: float,
+    capital: float,
     report_date: Optional[date] = None,
 ) -> Path:
     d = report_date or date.today()
@@ -131,7 +131,7 @@ def write_daily_report(
         summary_text=summary_text,
         trades_count=trades_count,
         skipped_count=skipped_count,
-        bankroll=bankroll,
+        capital=capital,
         report_date=d,
     )
     return _write("Daily Reports", filename, content)

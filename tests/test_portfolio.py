@@ -3,7 +3,7 @@ tests/test_portfolio.py
 =======================
 Unit tests for execution/portfolio.py.
 
-Covers buy/sell accounting, P&L math, averaging into a position, bankroll
+Covers buy/sell accounting, P&L math, averaging into a position, capital
 guards, equity/unrealized helpers, and JSON round-trip persistence.
 """
 
@@ -20,17 +20,17 @@ from execution.portfolio import Portfolio, Position
 
 @pytest.fixture
 def portfolio(tmp_path):
-    return Portfolio(path=tmp_path / "portfolio.json", initial_bankroll=10_000.0)
+    return Portfolio(path=tmp_path / "portfolio.json", initial_capital=10_000.0)
 
 
 # ── Buy accounting ───────────────────────────────────────────────────────────
 
-def test_record_buy_opens_position_and_debits_bankroll(portfolio):
+def test_record_buy_opens_position_and_debits_capital(portfolio):
     pos = portfolio.record_buy("mkt", "tok", "YES", fill_price=0.50, dollars=1_000.0)
     assert pos.shares == pytest.approx(2_000.0)      # 1000 / 0.50
     assert pos.avg_price == pytest.approx(0.50)
     assert pos.cost == pytest.approx(1_000.0)
-    assert portfolio.bankroll == pytest.approx(9_000.0)
+    assert portfolio.capital == pytest.approx(9_000.0)
     assert portfolio.open_count == 1
 
 
@@ -40,12 +40,12 @@ def test_record_buy_averages_into_existing_position(portfolio):
     assert pos.shares == pytest.approx(3_000.0)
     assert pos.cost == pytest.approx(1_400.0)
     assert pos.avg_price == pytest.approx(1_400.0 / 3_000.0)
-    assert portfolio.bankroll == pytest.approx(8_600.0)
+    assert portfolio.capital == pytest.approx(8_600.0)
     assert portfolio.open_count == 1
 
 
 def test_buy_rejects_overspend(portfolio):
-    with pytest.raises(ValueError, match="insufficient bankroll"):
+    with pytest.raises(ValueError, match="insufficient capital"):
         portfolio.record_buy("mkt", "tok", "YES", fill_price=0.50, dollars=20_000.0)
 
 
@@ -67,7 +67,7 @@ def test_record_sell_realizes_profit(portfolio):
     # proceeds = 2000 * 0.60 = 1200; pnl = 1200 - 1000 = 200
     assert pnl == pytest.approx(200.0)
     assert portfolio.realized_pnl == pytest.approx(200.0)
-    assert portfolio.bankroll == pytest.approx(10_200.0)
+    assert portfolio.capital == pytest.approx(10_200.0)
     assert portfolio.open_count == 0
 
 
@@ -75,7 +75,7 @@ def test_record_sell_realizes_loss(portfolio):
     portfolio.record_buy("mkt", "tok", "YES", fill_price=0.50, dollars=1_000.0)
     pnl = portfolio.record_sell("mkt", exit_price=0.40)
     assert pnl == pytest.approx(-200.0)
-    assert portfolio.bankroll == pytest.approx(9_800.0)
+    assert portfolio.capital == pytest.approx(9_800.0)
 
 
 def test_sell_without_position_raises(portfolio):
@@ -91,7 +91,7 @@ def test_unrealized_and_equity(portfolio):
     prices = {"a": 0.55, "b": 0.20}
     # a: 2000*0.55 - 1000 = +100 ; b: 2000*0.20 - 500 = -100
     assert portfolio.unrealized_pnl(prices) == pytest.approx(0.0)
-    # equity = bankroll(8500) + 2000*0.55 + 2000*0.20 = 8500 + 1100 + 400 = 10000
+    # equity = capital(8500) + 2000*0.55 + 2000*0.20 = 8500 + 1100 + 400 = 10000
     assert portfolio.equity(prices) == pytest.approx(10_000.0)
 
 
@@ -107,13 +107,13 @@ def test_has_and_get_position(portfolio):
 
 def test_state_persists_across_reload(tmp_path):
     path = tmp_path / "portfolio.json"
-    p1 = Portfolio(path=path, initial_bankroll=10_000.0)
+    p1 = Portfolio(path=path, initial_capital=10_000.0)
     p1.record_buy("mkt", "tok", "YES", fill_price=0.50, dollars=1_000.0)
     p1.record_buy("other", "tok2", "NO", fill_price=0.30, dollars=300.0)
     p1.record_sell("other", exit_price=0.45)
 
     p2 = Portfolio(path=path)  # reload from disk
-    assert p2.bankroll == pytest.approx(p1.bankroll)
+    assert p2.capital == pytest.approx(p1.capital)
     assert p2.realized_pnl == pytest.approx(p1.realized_pnl)
     assert p2.open_count == 1
     pos = p2.get_position("mkt")
@@ -121,10 +121,10 @@ def test_state_persists_across_reload(tmp_path):
     assert pos.outcome == "YES"
 
 
-def test_initial_bankroll_ignored_when_file_exists(tmp_path):
+def test_initial_capital_ignored_when_file_exists(tmp_path):
     path = tmp_path / "portfolio.json"
-    Portfolio(path=path, initial_bankroll=10_000.0).record_buy(
+    Portfolio(path=path, initial_capital=10_000.0).record_buy(
         "mkt", "tok", "YES", fill_price=0.5, dollars=1_000.0
     )
-    reloaded = Portfolio(path=path, initial_bankroll=999.0)
-    assert reloaded.bankroll == pytest.approx(9_000.0)  # loaded, not the new initial
+    reloaded = Portfolio(path=path, initial_capital=999.0)
+    assert reloaded.capital == pytest.approx(9_000.0)  # loaded, not the new initial

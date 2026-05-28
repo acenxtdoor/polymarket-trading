@@ -29,17 +29,17 @@ def kelly_fraction(p: float, price: float) -> float:
 
 
 def position_size(
-    bankroll: float,
+    capital: float,
     p: float,
     price: float,
     conviction_multiplier: float = 1.0,
     kalshi_multiplier: float = 1.0,
 ) -> float:
     """
-    Return the dollar amount to bet after applying multipliers and the 10% bankroll cap.
+    Return the dollar amount to bet after applying multipliers and the 10% capital cap.
 
     Args:
-        bankroll:             total available capital in dollars
+        capital:             total available capital in dollars
         p:                    estimated true probability of YES
         price:                current market YES price
         conviction_multiplier: 1.0 / 1.25 / 1.5 based on how many traders agree
@@ -48,8 +48,8 @@ def position_size(
     Returns:
         Dollar position size, or 0.0 if there is no edge.
     """
-    if bankroll <= 0:
-        logger.warning(f"Invalid bankroll: {bankroll}")
+    if capital <= 0:
+        logger.warning(f"Invalid capital: {capital}")
         return 0.0
 
     # When the Gamma API has no live token price, avg_trader_price and yes_price
@@ -73,11 +73,11 @@ def position_size(
 
     adjusted = f * conviction_multiplier * kalshi_multiplier
     capped = min(adjusted, MAX_POSITION_PCT)
-    size = bankroll * capped
+    size = capital * capped
 
     logger.info(
         f"Kelly sizing: p={p:.3f} price={price:.3f} f*={f:.4f} "
         f"conviction={conviction_multiplier}x kalshi={kalshi_multiplier}x "
-        f"-> capped at {capped:.2%} of bankroll = ${size:.2f}"
+        f"-> capped at {capped:.2%} of capital = ${size:.2f}"
     )
     return size

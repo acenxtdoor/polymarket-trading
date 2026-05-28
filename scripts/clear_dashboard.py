@@ -2,7 +2,7 @@
 scripts/clear_dashboard.py
 ==========================
 Wipe all bot-generated notes from the Obsidian vault and optionally reset
-the paper-trading portfolio back to its initial bankroll.
+the paper-trading portfolio back to its initial capital.
 
 Usage:
     python scripts/clear_dashboard.py            # clears vault only
@@ -78,15 +78,15 @@ def clear_vault(vault: Path, dry_run: bool = False) -> None:
 def reset_portfolio(dry_run: bool = False) -> None:
     path = Path(config.PORTFOLIO_PATH)
     data = {
-        "bankroll": config.INITIAL_BANKROLL,
+        "capital": config.INITIAL_CAPITAL,
         "realized_pnl": 0.0,
         "positions": {},
     }
     if dry_run:
-        print(f"  [DRY RUN] Would reset {path} → bankroll=${config.INITIAL_BANKROLL:,.2f}, no positions")
+        print(f"  [DRY RUN] Would reset {path} → capital=${config.INITIAL_CAPITAL:,.2f}, no positions")
     else:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        print(f"  Reset {path} → bankroll=${config.INITIAL_BANKROLL:,.2f}, 0 positions")
+        print(f"  Reset {path} → capital=${config.INITIAL_CAPITAL:,.2f}, 0 positions")
 
 
 def main() -> None:
@@ -94,7 +94,7 @@ def main() -> None:
     parser.add_argument(
         "--reset-portfolio",
         action="store_true",
-        help="Also reset portfolio.json to the initial bankroll (erases all paper P&L).",
+        help="Also reset portfolio.json to the initial capital (erases all paper P&L).",
     )
     parser.add_argument(
         "--dry-run",
@@ -119,7 +119,7 @@ def main() -> None:
     print(f"Portfolio: {config.PORTFOLIO_PATH}")
     print(f"Folders:   {', '.join(CLEARABLE_FOLDERS)}")
     if args.reset_portfolio:
-        print(f"Portfolio reset: YES → ${config.INITIAL_BANKROLL:,.2f}")
+        print(f"Portfolio reset: YES → ${config.INITIAL_CAPITAL:,.2f}")
     if args.dry_run:
         print("Mode: DRY RUN (no files will be changed)")
     print()

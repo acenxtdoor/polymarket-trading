@@ -30,7 +30,7 @@ class DailySummaryInput:
     trades_placed: list[dict]   # list of {market_title, action, conviction, kelly_fraction, entry_price, claude_confidence}
     trades_skipped: list[dict]  # list of {market_title, skip_reason}
     flags_raised: list[str]
-    bankroll: float
+    capital: float
     run_date: date | None = None
 
 
@@ -53,7 +53,7 @@ def _build_prompt(data: DailySummaryInput) -> str:
 
     return f"""\
 Date: {run_date}
-Bankroll: ${data.bankroll:,.2f}
+Capital: ${data.capital:,.2f}
 Trades placed ({placed}):
 {placed_lines}
 Trades skipped ({skipped}):
@@ -70,7 +70,7 @@ def generate_daily_summary(data: DailySummaryInput) -> str:
         return (
             f"JARVIS offline — no ANTHROPIC_API_KEY set.\n\n"
             f"**{d.isoformat()}:** {len(data.trades_placed)} trade(s) placed, "
-            f"{len(data.trades_skipped)} skipped. Bankroll: ${data.bankroll:,.2f}."
+            f"{len(data.trades_skipped)} skipped. Capital: ${data.capital:,.2f}."
         )
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
@@ -79,7 +79,7 @@ def generate_daily_summary(data: DailySummaryInput) -> str:
     summary_parts: list[str] = []
     try:
         with client.messages.stream(
-            model="claude-opus-4-7",
+            model=config.ANTHROPIC_MODEL,
             max_tokens=512,
             thinking={"type": "adaptive"},
             system=[

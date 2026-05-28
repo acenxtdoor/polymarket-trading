@@ -113,7 +113,7 @@ def assess_market(
 
     try:
         response = client.messages.create(
-            model="claude-opus-4-7",
+            model=config.ANTHROPIC_MODEL,
             max_tokens=512,
             thinking={"type": "adaptive"},
             output_config={"format": {"type": "json_schema", "name": "assessment", "schema": _SCHEMA}},

@@ -51,7 +51,7 @@ print("\n=== position_size tests ===\n")
 # No edge => $0
 check_zero("No edge => $0", position_size(10000, 0.5, 0.5))
 
-# Basic: p=0.7, price=0.5, f*=0.4, bankroll=10000, no multipliers => 0.4 capped at 0.10 => $1000
+# Basic: p=0.7, price=0.5, f*=0.4, capital=10000, no multipliers => 0.4 capped at 0.10 => $1000
 check("Capped at 10% (f*=0.4)", position_size(10000, 0.7, 0.5), 1000.0)
 
 # Mild edge, no multipliers: p=0.6, price=0.5, f*=0.2 => 0.2 capped at 0.10 => $1000
@@ -73,9 +73,9 @@ check("Multipliers near cap (0.04->0.09)", position_size(10000, 0.52, 0.5, convi
 # Multipliers exceed cap: f*=0.2, conviction=1.5, kalshi=1.5 => 0.45 capped at 0.10 => $1000
 check("Multipliers exceed cap => capped at $1000", position_size(10000, 0.6, 0.5, conviction_multiplier=1.5, kalshi_multiplier=1.5), 1000.0)
 
-# Invalid bankroll
-check_zero("Invalid bankroll=0", position_size(0, 0.6, 0.5))
-check_zero("Invalid bankroll=-100", position_size(-100, 0.6, 0.5))
+# Invalid capital
+check_zero("Invalid capital=0", position_size(0, 0.6, 0.5))
+check_zero("Invalid capital=-100", position_size(-100, 0.6, 0.5))
 
 print("\n=== Summary ===\n")
 passed = sum(1 for r in results if r[0] == PASS)

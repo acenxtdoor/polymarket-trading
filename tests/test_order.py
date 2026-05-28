@@ -4,7 +4,7 @@ tests/test_order.py
 Unit tests for execution/order.py (paper-trading OrderExecutor).
 
 Covers DRY_RUN buy/sell fills via the slippage model, rejection paths
-(bankroll, slippage, missing market, no position), and the live seam.
+(capital, slippage, missing market, no position), and the live seam.
 """
 
 import os
@@ -32,7 +32,7 @@ class FakeMarketFilter:
 
 @pytest.fixture
 def portfolio(tmp_path):
-    return Portfolio(path=tmp_path / "portfolio.json", initial_bankroll=10_000.0)
+    return Portfolio(path=tmp_path / "portfolio.json", initial_capital=10_000.0)
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def test_buy_fills_at_slippage_adjusted_price(executor, portfolio):
     # Portfolio reflects the fill
     pos = portfolio.get_position("mkt")
     assert pos.shares == pytest.approx(100.0 / 0.605)
-    assert portfolio.bankroll == pytest.approx(9_900.0)
+    assert portfolio.capital == pytest.approx(9_900.0)
 
 
 def test_buy_rejected_on_high_slippage(executor, portfolio):
@@ -63,13 +63,13 @@ def test_buy_rejected_on_high_slippage(executor, portfolio):
     assert result.filled is False
     assert "slippage" in result.reason
     assert portfolio.open_count == 0
-    assert portfolio.bankroll == pytest.approx(10_000.0)
+    assert portfolio.capital == pytest.approx(10_000.0)
 
 
-def test_buy_rejected_on_insufficient_bankroll(executor, portfolio):
+def test_buy_rejected_on_insufficient_capital(executor, portfolio):
     result = executor.buy("mkt", "tok", "YES", price=0.60, size_dollars=20_000.0)
     assert result.filled is False
-    assert "insufficient bankroll" in result.reason
+    assert "insufficient capital" in result.reason
     assert portfolio.open_count == 0
 
 
@@ -98,8 +98,8 @@ def test_sell_closes_position_and_returns_filled(executor, portfolio):
     assert result.fill_price == pytest.approx(0.70)
     assert result.shares == pytest.approx(shares)
     assert portfolio.open_count == 0
-    # proceeds added back to bankroll
-    assert portfolio.bankroll == pytest.approx(9_900.0 + shares * 0.70)
+    # proceeds added back to capital
+    assert portfolio.capital == pytest.approx(9_900.0 + shares * 0.70)
 
 
 def test_sell_without_position_rejected(executor):

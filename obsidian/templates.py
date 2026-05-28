@@ -140,7 +140,7 @@ def daily_report_note(
     summary_text: str,
     trades_count: int,
     skipped_count: int,
-    bankroll: float,
+    capital: float,
     report_date: Optional[date] = None,
 ) -> str:
     d = report_date or date.today()
@@ -150,13 +150,13 @@ def daily_report_note(
 date: {d.isoformat()}
 trades_placed: {trades_count}
 trades_skipped: {skipped_count}
-bankroll: {bankroll:.2f}
+capital: {capital:.2f}
 tags: ["daily-report"]
 ---
 
 # Daily Report — {d.isoformat()}
 
-**Bankroll:** ${bankroll:,.2f}
+**Capital:** ${capital:,.2f}
 **Trades placed:** {trades_count}
 **Trades skipped:** {skipped_count}
 
@@ -225,7 +225,7 @@ SORT file.mtime DESC
 ## Daily Reports
 
 ```dataview
-TABLE date, trades_placed, trades_skipped, bankroll
+TABLE date, trades_placed, trades_skipped, capital
 FROM "Daily Reports"
 SORT date DESC
 ```

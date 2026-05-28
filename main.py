@@ -162,9 +162,9 @@ def run_once(
         signals,
         engine,
         base_kelly_size=position_size(
-            portfolio.bankroll, p=0.60, price=0.55
+            portfolio.capital, p=0.60, price=0.55
         ),
-        bankroll=portfolio.bankroll,
+        capital=portfolio.capital,
     )
     actionable = [d for d in decisions if d.conviction.execute]
     logger.info(
@@ -319,7 +319,7 @@ def run_once(
 
         kalshi_result = get_kalshi_signal(entry.market_title, entry.yes_price)
         size = position_size(
-            bankroll=portfolio.bankroll,
+            capital=portfolio.capital,
             # p = avg price top traders paid → their implied true probability
             # price = current live market price → the "cost" we pay
             # Edge exists when traders paid less than current price (or vice-versa).
@@ -342,7 +342,7 @@ def run_once(
 
         if result.filled:
             stop_manager.open_position(entry.market_id, result.fill_price)
-            kelly_f = size / portfolio.bankroll if portfolio.bankroll > 0 else 0
+            kelly_f = size / portfolio.capital if portfolio.capital > 0 else 0
             session_trades.append({
                 "market_title": entry.market_title,
                 "action": "BUY",
@@ -440,7 +440,7 @@ def run_once(
                     )
 
     logger.info(
-        f"Run complete — bankroll=${portfolio.bankroll:,.2f}  "
+        f"Run complete — capital=${portfolio.capital:,.2f}  "
         f"open={portfolio.open_count}  "
         f"realized P&L=${portfolio.realized_pnl:,.2f}"
     )
@@ -469,14 +469,14 @@ def maybe_write_daily_summary(
         trades_placed=session_trades,
         trades_skipped=session_skips,
         flags_raised=list(set(session_flags)),
-        bankroll=portfolio.bankroll,
+        capital=portfolio.capital,
         run_date=last_summary_date,
     ))
     write_daily_report(
         summary_text=summary_text,
         trades_count=len(session_trades),
         skipped_count=len(session_skips),
-        bankroll=portfolio.bankroll,
+        capital=portfolio.capital,
         report_date=last_summary_date,
     )
     logger.info(f"[MAIN] Daily report written for {last_summary_date}")
@@ -501,6 +501,20 @@ def main() -> None:
     portfolio = Portfolio()
     market_filter = MarketFilter()
     stop_manager = TrailingStopManager()
+
+    # Rehydrate trailing stops from portfolio.json so persisted positions
+    # remain exit-eligible across restarts. Without this, the manager
+    # starts empty and existing positions can never trigger a stop sell.
+    # peak_price isn't persisted, so we seed peak = entry = avg_price —
+    # the stop is active again from the original cost basis.
+    for slug, pos in portfolio.positions.items():
+        stop_manager.open_position(slug, pos.avg_price)
+    if portfolio.positions:
+        logger.info(
+            f"[MAIN] Rehydrated {len(portfolio.positions)} trailing stop(s) "
+            "from portfolio"
+        )
+
     executor = OrderExecutor(portfolio, market_filter)
     aggregator = SignalAggregator()
     engine = ConvictionEngine()
@@ -522,7 +536,7 @@ def main() -> None:
 
     logger.info(
         f"JARVIS bot started — interval={LOOP_INTERVAL}s  "
-        f"dry_run={config.DRY_RUN}  bankroll=${portfolio.bankroll:,.2f}"
+        f"dry_run={config.DRY_RUN}  capital=${portfolio.capital:,.2f}"
     )
 
     while running:

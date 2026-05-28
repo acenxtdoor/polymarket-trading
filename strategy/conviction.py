@@ -76,7 +76,7 @@ class ConsensusDecision:
 class ConvictionEngine:
     """
     Scales a base Kelly bet size by trader consensus count and enforces the
-    hard bankroll cap.
+    hard capital cap.
 
     Tiers
     -----
@@ -90,7 +90,7 @@ class ConvictionEngine:
         self,
         base_kelly_size: float,
         trader_count: int,
-        bankroll: float,
+        capital: float,
     ) -> ConvictionResult:
         if trader_count < _EXECUTE_THRESHOLD:
             logger.info(
@@ -104,7 +104,7 @@ class ConvictionEngine:
 
         multiplier = _MULTIPLIERS.get(trader_count, _MULTIPLIER_MAX)
         raw_size = base_kelly_size * multiplier
-        cap = bankroll * MAX_POSITION_PCT
+        cap = capital * MAX_POSITION_PCT
         final_size = min(raw_size, cap)
         capped = final_size < raw_size
 
@@ -142,7 +142,7 @@ class SignalAggregator:
         signals: list[TradeSignal],
         engine: ConvictionEngine,
         base_kelly_size: float,
-        bankroll: float,
+        capital: float,
     ) -> list[ConsensusDecision]:
         """
         Aggregate signals from this tick, merge with pending queue, and
@@ -156,7 +156,7 @@ class SignalAggregator:
         for key, agg in grouped.items():
             seen_keys.add(key)
             merged = self._merge_with_pending(key, agg)
-            conviction = engine.evaluate(base_kelly_size, merged.trader_count, bankroll)
+            conviction = engine.evaluate(base_kelly_size, merged.trader_count, capital)
 
             if conviction.execute:
                 self._pending.pop(key, None)
@@ -181,7 +181,7 @@ class SignalAggregator:
         # Emit decisions for keys that are only in the pending queue this tick
         for key, agg in self._pending.items():
             if key not in seen_keys:
-                conviction = engine.evaluate(base_kelly_size, agg.trader_count, bankroll)
+                conviction = engine.evaluate(base_kelly_size, agg.trader_count, capital)
                 decisions.append(ConsensusDecision(
                     market_slug=key[0],
                     outcome=key[1],
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     ]
 
     print("\n--- Processing Mock Signals ---")
-    decisions = aggregator.process(mock_signals, engine, base_kelly_size=500.0, bankroll=10000.0)
+    decisions = aggregator.process(mock_signals, engine, base_kelly_size=500.0, capital=10000.0)
 
     for d in decisions:
         status = "EXECUTE" if d.conviction.execute else "PENDING"
