@@ -59,18 +59,22 @@ def get_trader_trades(address: str, limit: int = 50) -> list:
 
 
 def get_token_price(token_id: str) -> float | None:
-    """Fetch the live midpoint price for a token from the CLOB API.
+    """Fetch the live midpoint price for a token via the Gamma API.
 
-    Uses the public /midpoint endpoint — no authentication required.
-    Returns a float in (0, 1) or None if unavailable.
+    Queries /markets?token_id=... which returns bestBid and bestAsk for
+    that specific token. No authentication required.
+    Returns mid = (bestBid + bestAsk) / 2, or None if unavailable.
     """
-    data = _get(f"{CLOB_BASE_URL}/midpoint", params={"token_id": token_id})
-    if not isinstance(data, dict):
+    data = _get(f"{GAMMA_BASE_URL}/markets", params={"token_id": token_id})
+    if not isinstance(data, list) or not data:
         return None
     try:
-        mid = float(data.get("mid", 0))
+        market = data[0]
+        bid = float(market["bestBid"])
+        ask = float(market["bestAsk"])
+        mid = (bid + ask) / 2
         if 0.0 < mid < 1.0:
             return mid
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, KeyError):
         pass
     return None
