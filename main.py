@@ -338,6 +338,18 @@ def run_once(
             logger.info(f"[MAIN] {entry.market_id}: Kelly size=0 — no edge, skip")
             continue
 
+        # Reject if current price is already below the trailing stop threshold
+        # relative to the trader average — the position would stop-loss immediately.
+        stop_floor = entry.avg_trader_price * (1.0 - config.TRAILING_STOP_PCT)
+        if entry.yes_price < stop_floor:
+            logger.warning(
+                f"[MAIN] {entry.market_id}: current price {entry.yes_price:.4f} already "
+                f"below stop floor {stop_floor:.4f} (trader avg {entry.avg_trader_price:.4f}) "
+                "— skipping to avoid immediate stop-loss"
+            )
+            closed_this_session.add(entry.market_id)  # permanent blacklist for this session
+            continue
+
         result = executor.buy(
             market_slug=entry.market_id,
             token_id=token_id,
