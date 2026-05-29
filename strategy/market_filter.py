@@ -23,7 +23,10 @@ logger = get_logger(__name__)
 
 
 def _parse_close_time(meta: dict) -> datetime | None:
-    for key in ("endDate", "end_date", "closeTime", "close_time", "resolutionTime", "resolution_time"):
+    # Prefer closeTime / close_time — reflects when THIS market stops trading
+    # (individual game). endDate is often the series/tournament end and is
+    # too far out for game-level markets.
+    for key in ("closeTime", "close_time", "endDate", "end_date", "resolutionTime", "resolution_time"):
         raw = meta.get(key)
         if not raw:
             continue
