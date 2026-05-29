@@ -140,8 +140,11 @@ def run_once(
     session_trades: list[dict],
     session_skips: list[dict],
     session_flags: list[str],
+    closed_this_session: set[str] | None = None,
 ) -> None:
     """Execute one full iteration of the bot loop."""
+    if closed_this_session is None:
+        closed_this_session = set()
 
     # ── a. Fetch traders + signals ────────────────────────────────────────
     logger.info("=" * 60)
@@ -305,6 +308,9 @@ def run_once(
         if portfolio.has_position(entry.market_id):
             logger.info(f"[MAIN] {entry.market_id}: already holding position — skip")
             continue
+        if entry.market_id in closed_this_session:
+            logger.info(f"[MAIN] {entry.market_id}: closed by stop/take-profit this session — skip re-buy")
+            continue
 
         # Find the matching decision for token_id + Kelly inputs
         decision = next(
@@ -422,11 +428,12 @@ def run_once(
                     f"[MAIN] Take-profit sell threw exception for {slug}: {exc!r}"
                 )
             finally:
-                # Always evict from stop tracker — no matter what the sell does.
+                # Always evict from stop tracker and blacklist — no matter what the sell does.
                 try:
                     stop_manager.close_position(slug)
                 except KeyError:
                     pass
+                closed_this_session.add(slug)
             if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 title_for_note = _market_title(metadata) or slug
@@ -476,11 +483,12 @@ def run_once(
                     f"[MAIN] Stop-loss sell threw exception for {slug}: {exc!r}"
                 )
             finally:
-                # Always evict from stop tracker — no matter what the sell does.
+                # Always evict from stop tracker and blacklist — no matter what the sell does.
                 try:
                     stop_manager.close_position(slug)
                 except KeyError:
                     pass
+                closed_this_session.add(slug)
             if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 logger.info(
@@ -617,6 +625,7 @@ def main() -> None:
     session_trades: list[dict] = []
     session_skips: list[dict] = []
     session_flags: list[str] = []
+    closed_this_session: set[str] = set()   # markets stopped-out/taken-profit — never re-buy
     last_summary_date: date = date.today()
 
     logger.info(
@@ -630,6 +639,7 @@ def main() -> None:
                 aggregator, engine, market_filter,
                 portfolio, executor, stop_manager,
                 session_trades, session_skips, session_flags,
+                closed_this_session,
             )
             last_summary_date = maybe_write_daily_summary(
                 session_trades, session_skips, session_flags,
