@@ -61,7 +61,7 @@ from execution.portfolio import Portfolio
 from intelligence.summarizer import DailySummaryInput, generate_daily_summary
 from intelligence.watchlist import MarketCandidate, build_watchlist
 from news.newsapi import fetch_market_news
-from obsidian.writer import ensure_vault, update_trade_outcome, write_daily_report, write_skip, write_trade
+from obsidian.writer import ensure_vault, update_trade_outcome, update_trade_price, write_daily_report, write_skip, write_trade
 from polymarket.api import get_token_price
 from polymarket.traders import collect_all_signals, fetch_top_traders
 from strategy.conviction import ConvictionEngine, SignalAggregator
@@ -362,6 +362,8 @@ def run_once(
                 kelly_fraction=kelly_f,
                 position_size=size,
                 entry_price=result.fill_price,
+                take_profit=result.fill_price * (1.0 + config.TAKE_PROFIT_PCT),
+                current_price=entry.yes_price,
                 claude_confidence=entry.confidence,
                 claude_summary=entry.summary,
                 claude_flags=entry.flags,
@@ -390,6 +392,13 @@ def run_once(
         current_price = (
             get_token_price(pos.token_id)
             or _extract_yes_price(metadata, pos.avg_price)
+        )
+
+        # Push live price to the Obsidian trade note so the dashboard stays current.
+        update_trade_price(
+            market_title=_market_title(metadata) or slug,
+            current_price=current_price,
+            market_id=slug,
         )
 
         # ── Take-profit check (runs before trailing stop) ─────────────────

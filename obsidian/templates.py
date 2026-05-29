@@ -36,11 +36,15 @@ def trade_note(
     pnl: Optional[float] = None,
     tags: Optional[list[str]] = None,
     trade_date: Optional[date] = None,
+    take_profit: Optional[float] = None,
+    current_price: Optional[float] = None,
 ) -> str:
     d = trade_date or date.today()
     tags_list = tags or ["trade", action.lower()]
     outcome_str = outcome or "open"
     pnl_str = f"{pnl:.2f}" if pnl is not None else "0"
+    tp = take_profit if take_profit is not None else entry_price
+    cp = current_price if current_price is not None else entry_price
 
     return f"""\
 ---
@@ -53,6 +57,8 @@ kalshi_signal: "{_yaml_str(kalshi_signal)}"
 kelly_fraction: {kelly_fraction:.4f}
 position_size: {position_size:.2f}
 entry_price: {entry_price:.4f}
+take_profit: {tp:.4f}
+current_price: {cp:.4f}
 claude_confidence: "{_yaml_str(claude_confidence)}"
 claude_flags: {_fmt_list(claude_flags)}
 traders: {_fmt_list(traders)}
@@ -66,7 +72,7 @@ tags: {_fmt_list(tags_list)}
 **Date:** {d.isoformat()}
 **Action:** {action} | **Conviction:** {conviction} trader(s) | **Kalshi:** {kalshi_signal}
 **Kelly fraction:** {kelly_fraction:.2%} → **Position size:** ${position_size:,.2f}
-**Entry price:** {entry_price:.4f}
+**Entry price:** {entry_price:.4f} | **Take-profit:** {tp:.4f} | **Current:** {cp:.4f}
 
 ## JARVIS Assessment
 
@@ -188,7 +194,7 @@ GROUP BY true
 ## Active Positions
 
 ```dataview
-TABLE market_title, entry_price, position_size, claude_confidence, traders
+TABLE market_title, entry_price, take_profit, current_price, position_size, claude_confidence
 FROM "Trades"
 WHERE outcome = "open"
 SORT date DESC

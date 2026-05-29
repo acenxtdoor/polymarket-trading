@@ -137,6 +137,38 @@ def write_daily_report(
     return _write("Daily Reports", filename, content)
 
 
+def update_trade_price(
+    market_title: str,
+    current_price: float,
+    trade_date: Optional[date] = None,
+    market_id: Optional[str] = None,
+) -> bool:
+    """Update the current_price field in an open trade note (called every loop tick)."""
+    d = trade_date or date.today()
+    filename = f"{d.isoformat()}-{_safe_filename(market_title)}.md"
+    note_path = _vault() / "Trades" / filename
+
+    if not note_path.exists() and market_id:
+        trades_dir = _vault() / "Trades"
+        for candidate in sorted(trades_dir.glob("*.md"), reverse=True):
+            try:
+                if f'market_id: "{market_id}"' in candidate.read_text(encoding="utf-8"):
+                    note_path = candidate
+                    break
+            except OSError:
+                continue
+
+    if not note_path.exists():
+        return False
+
+    text = note_path.read_text(encoding="utf-8")
+    text = re.sub(r'current_price: -?[\d]+(?:\.[\d]+)?', f'current_price: {current_price:.4f}', text)
+    # Also update the body line
+    text = re.sub(r'\*\*Current:\*\* [\d\.]+', f'**Current:** {current_price:.4f}', text)
+    note_path.write_text(text, encoding="utf-8")
+    return True
+
+
 def update_trade_outcome(
     market_title: str,
     outcome: str,
