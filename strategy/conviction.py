@@ -14,9 +14,10 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_EXECUTE_THRESHOLD = 2
+_EXECUTE_THRESHOLD = 1
 
 _MULTIPLIERS: dict[int, float] = {
+    1: 0.75,   # single trader — smaller size, JARVIS is the quality gate
     2: 1.0,
     3: 1.25,
 }
@@ -80,7 +81,7 @@ class ConvictionEngine:
 
     Tiers
     -----
-    1 trader  → pending (execute=False, size=0)
+    1 trader  → 0.75x Kelly (JARVIS is the quality gate)
     2 traders → 1.0x Kelly
     3 traders → 1.25x Kelly
     4+ traders → 1.5x Kelly
