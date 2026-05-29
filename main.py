@@ -402,7 +402,15 @@ def run_once(
                 f"current={current_price:.4f}  entry={pos_avg_price:.4f}  "
                 f"target={take_profit_price:.4f}"
             )
-            sell_result = executor.sell(slug, current_price)
+            try:
+                sell_result = executor.sell(slug, current_price)
+            except Exception as exc:
+                logger.error(
+                    f"[MAIN] Take-profit sell threw exception for {slug}: {exc!r} — "
+                    "removing from stop tracker to prevent infinite re-trigger"
+                )
+                stop_manager.close_position(slug)
+                continue
             if sell_result.filled:
                 stop_manager.close_position(slug)
                 pnl = sell_result.size_dollars - pos_cost
@@ -433,6 +441,12 @@ def run_once(
                         outcome="closed",
                         pnl=pnl,
                     )
+            else:
+                logger.error(
+                    f"[MAIN] Take-profit sell rejected for {slug}: {sell_result.reason} — "
+                    "removing from stop tracker to prevent infinite re-trigger"
+                )
+                stop_manager.close_position(slug)
             continue  # skip trailing stop check for this position
 
         stop_result = stop_manager.update(slug, current_price)
@@ -441,7 +455,15 @@ def run_once(
             # Capture cost before executor.sell() removes the position from portfolio.
             pos_cost = pos.cost
             pos_avg_price = pos.avg_price
-            sell_result = executor.sell(slug, current_price)
+            try:
+                sell_result = executor.sell(slug, current_price)
+            except Exception as exc:
+                logger.error(
+                    f"[MAIN] Stop-loss sell threw exception for {slug}: {exc!r} — "
+                    "removing from stop tracker to prevent infinite re-trigger"
+                )
+                stop_manager.close_position(slug)
+                continue
             if sell_result.filled:
                 stop_manager.close_position(slug)
                 pnl = sell_result.size_dollars - pos_cost
@@ -449,7 +471,6 @@ def run_once(
                     f"[MAIN] Trailing stop triggered: {slug}  P&L=${pnl:,.2f}"
                 )
                 # Update the Obsidian trade note with final outcome and P&L.
-                # title_for_note uses real metadata (now fetched with token_id fallback).
                 title_for_note = _market_title(metadata) or slug
                 updated = update_trade_outcome(
                     market_title=title_for_note,
@@ -482,6 +503,12 @@ def run_once(
                         outcome="closed",
                         pnl=pnl,
                     )
+            else:
+                logger.error(
+                    f"[MAIN] Stop-loss sell rejected for {slug}: {sell_result.reason} — "
+                    "removing from stop tracker to prevent infinite re-trigger"
+                )
+                stop_manager.close_position(slug)
 
     logger.info(
         f"Run complete — capital=${portfolio.capital:,.2f}  "
