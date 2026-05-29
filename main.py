@@ -381,7 +381,10 @@ def run_once(
         # Fetch position first so we have token_id for the metadata lookup.
         pos = portfolio.get_position(slug)
         if pos is None:
-            stop_manager.close_position(slug)
+            try:
+                stop_manager.close_position(slug)
+            except KeyError:
+                pass
             continue
 
         # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
@@ -411,17 +414,20 @@ def run_once(
                 f"current={current_price:.4f}  entry={pos_avg_price:.4f}  "
                 f"target={take_profit_price:.4f}"
             )
+            sell_result = None
             try:
                 sell_result = executor.sell(slug, current_price)
             except Exception as exc:
                 logger.error(
-                    f"[MAIN] Take-profit sell threw exception for {slug}: {exc!r} — "
-                    "removing from stop tracker to prevent infinite re-trigger"
+                    f"[MAIN] Take-profit sell threw exception for {slug}: {exc!r}"
                 )
-                stop_manager.close_position(slug)
-                continue
-            if sell_result.filled:
-                stop_manager.close_position(slug)
+            finally:
+                # Always evict from stop tracker — no matter what the sell does.
+                try:
+                    stop_manager.close_position(slug)
+                except KeyError:
+                    pass
+            if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 title_for_note = _market_title(metadata) or slug
                 updated = update_trade_outcome(
@@ -450,12 +456,10 @@ def run_once(
                         outcome="closed",
                         pnl=pnl,
                     )
-            else:
+            elif sell_result is not None:
                 logger.error(
-                    f"[MAIN] Take-profit sell rejected for {slug}: {sell_result.reason} — "
-                    "removing from stop tracker to prevent infinite re-trigger"
+                    f"[MAIN] Take-profit sell rejected for {slug}: {sell_result.reason}"
                 )
-                stop_manager.close_position(slug)
             continue  # skip trailing stop check for this position
 
         stop_result = stop_manager.update(slug, current_price)
@@ -464,17 +468,20 @@ def run_once(
             # Capture cost before executor.sell() removes the position from portfolio.
             pos_cost = pos.cost
             pos_avg_price = pos.avg_price
+            sell_result = None
             try:
                 sell_result = executor.sell(slug, current_price)
             except Exception as exc:
                 logger.error(
-                    f"[MAIN] Stop-loss sell threw exception for {slug}: {exc!r} — "
-                    "removing from stop tracker to prevent infinite re-trigger"
+                    f"[MAIN] Stop-loss sell threw exception for {slug}: {exc!r}"
                 )
-                stop_manager.close_position(slug)
-                continue
-            if sell_result.filled:
-                stop_manager.close_position(slug)
+            finally:
+                # Always evict from stop tracker — no matter what the sell does.
+                try:
+                    stop_manager.close_position(slug)
+                except KeyError:
+                    pass
+            if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 logger.info(
                     f"[MAIN] Trailing stop triggered: {slug}  P&L=${pnl:,.2f}"
@@ -512,12 +519,10 @@ def run_once(
                         outcome="closed",
                         pnl=pnl,
                     )
-            else:
+            elif sell_result is not None:
                 logger.error(
-                    f"[MAIN] Stop-loss sell rejected for {slug}: {sell_result.reason} — "
-                    "removing from stop tracker to prevent infinite re-trigger"
+                    f"[MAIN] Stop-loss sell rejected for {slug}: {sell_result.reason}"
                 )
-                stop_manager.close_position(slug)
 
     logger.info(
         f"Run complete — capital=${portfolio.capital:,.2f}  "
