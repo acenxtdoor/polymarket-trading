@@ -73,7 +73,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-LOOP_INTERVAL: int = int(os.getenv("LOOP_INTERVAL", "300"))
+LOOP_INTERVAL: int = int(os.getenv("LOOP_INTERVAL", "60"))
 
 
 # ── 3. Helpers ────────────────────────────────────────────────────────────────
