@@ -208,7 +208,14 @@ class Portfolio:
             "realized_pnl": self.realized_pnl,
             "positions": {slug: asdict(pos) for slug, pos in self.positions.items()},
         }
-        self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Atomic write: write to a temp file then rename over the real file.
+        # os.replace() is atomic on Windows and POSIX — the file is either
+        # fully old or fully new, never half-written. This prevents a crash
+        # or restart mid-write from leaving a stale position in portfolio.json
+        # that would be rehydrated into the stop manager on the next startup.
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, self.path)
 
     def _load(self) -> None:
         data = json.loads(self.path.read_text(encoding="utf-8"))
