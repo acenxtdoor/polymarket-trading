@@ -65,6 +65,8 @@ def write_trade(
     pnl: Optional[float] = None,
     tags: Optional[list[str]] = None,
     trade_date: Optional[date] = None,
+    take_profit: Optional[float] = None,
+    current_price: Optional[float] = None,
 ) -> Path:
     d = trade_date or date.today()
     filename = f"{d.isoformat()}-{_safe_filename(market_title)}.md"
@@ -85,6 +87,8 @@ def write_trade(
         pnl=pnl,
         tags=tags,
         trade_date=d,
+        take_profit=take_profit,
+        current_price=current_price,
     )
     return _write("Trades", filename, content)
 
