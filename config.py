@@ -17,7 +17,7 @@ MAX_SLIPPAGE_PCT = 0.03
 MIN_MARKET_VOLUME = 10_000
 MIN_MARKET_LIQUIDITY = 1_000
 MIN_HOURS_TO_CLOSE = 24
-MAX_DAYS_TO_CLOSE = 30
+MAX_DAYS_TO_CLOSE = 60
 
 KALSHI_CACHE_TTL = 600         # 10 minutes
 KALSHI_ENABLED = False         # set True + add KALSHI_API_KEY once you have credentials
@@ -46,7 +46,7 @@ INTELLIGENCE_WORKERS = 4  # parallel Claude calls
 # JARVIS watchlist — per-period market selection
 # Only consider markets resolving inside this near-term window (hours).
 WATCHLIST_MIN_RESOLUTION_HOURS = 24        # skip markets resolving sooner than this
-WATCHLIST_MAX_RESOLUTION_HOURS = 7 * 24    # skip markets resolving later than ~1 week
+WATCHLIST_MAX_RESOLUTION_HOURS = 14 * 24   # skip markets resolving later than ~2 weeks
 WATCHLIST_MIN_SCORE = 30.0                 # bot trades entries scoring at/above this
 
 # Score = base(confidence) + conviction bonus + Kalshi-agree bonus, clamped to 0–100.
