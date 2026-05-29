@@ -391,6 +391,50 @@ def run_once(
             get_token_price(pos.token_id)
             or _extract_yes_price(metadata, pos.avg_price)
         )
+
+        # ── Take-profit check (runs before trailing stop) ─────────────────
+        take_profit_price = pos.avg_price * (1.0 + config.TAKE_PROFIT_PCT)
+        if current_price >= take_profit_price:
+            pos_cost = pos.cost
+            pos_avg_price = pos.avg_price
+            logger.info(
+                f"[MAIN] Take-profit triggered: {slug}  "
+                f"current={current_price:.4f}  entry={pos_avg_price:.4f}  "
+                f"target={take_profit_price:.4f}"
+            )
+            sell_result = executor.sell(slug, current_price)
+            if sell_result.filled:
+                stop_manager.close_position(slug)
+                pnl = sell_result.size_dollars - pos_cost
+                title_for_note = _market_title(metadata) or slug
+                updated = update_trade_outcome(
+                    market_title=title_for_note,
+                    outcome="closed",
+                    pnl=pnl,
+                    market_id=slug,
+                )
+                if not updated:
+                    write_trade(
+                        market_id=slug,
+                        market_title=title_for_note,
+                        action="BUY",
+                        conviction=1,
+                        kalshi_signal="unknown",
+                        kelly_fraction=0.0,
+                        position_size=pos_cost,
+                        entry_price=pos_avg_price,
+                        claude_confidence="unknown",
+                        claude_summary=(
+                            "Position closed by take-profit. "
+                            "Original trade note was not found."
+                        ),
+                        claude_flags=["Note reconstructed on close", "Take-profit exit"],
+                        traders=[],
+                        outcome="closed",
+                        pnl=pnl,
+                    )
+            continue  # skip trailing stop check for this position
+
         stop_result = stop_manager.update(slug, current_price)
 
         if stop_result.should_close:

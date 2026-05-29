@@ -9,6 +9,7 @@ MIN_TRADER_VOLUME = 0  # volume > $0
 
 MAX_POSITION_PCT = 0.10        # 10% of capital
 TRAILING_STOP_PCT = 0.10       # 10% below peak
+TAKE_PROFIT_PCT = 0.10         # sell immediately when price gains 10% above entry
 KELLY_MIN_EDGE = 0.04          # assumed edge when live price = trader avg price (Gamma API gap)
 KALSHI_AGREEMENT_THRESHOLD = 0.05
 MAX_SLIPPAGE_PCT = 0.03
