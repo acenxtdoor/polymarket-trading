@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from polymarket.api import get_leaderboard, get_trader_trades
 from utils.logger import get_logger
 from config import TOP_TRADER_COUNT, MIN_TRADER_VOLUME
+
+# Only consider trader buys made within this window.
+# Stale signals (e.g. a buy from 3 days ago) should not drive new entries —
+# the trader may have already exited, the market may have moved, or the position
+# may have already been traded and closed by this bot in a previous session.
+MAX_SIGNAL_AGE_HOURS = 48
 
 logger = get_logger(__name__)
 
@@ -52,13 +59,32 @@ def fetch_top_traders() -> list[Trader]:
 
 
 def get_trader_signals(trader: Trader) -> list[TradeSignal]:
-    """Return recent buy signals from a single trader's trade history."""
+    """Return recent buy signals from a single trader's trade history.
+
+    Signals older than MAX_SIGNAL_AGE_HOURS are discarded.  Without this filter
+    the last-50-trades window can include buys from days ago, causing the bot to
+    re-enter markets it already traded (and possibly closed) in a prior session.
+    """
     trades = get_trader_trades(trader.address)
     signals = []
+    cutoff = time.time() - MAX_SIGNAL_AGE_HOURS * 3600
+    stale_count = 0
+
     for trade in trades:
         side = (trade.get("side") or "").upper()
         if side != "BUY":
             continue
+
+        # Drop signals that are too old.
+        ts_raw = trade.get("timestamp") or trade.get("created_at")
+        if ts_raw is not None:
+            try:
+                if float(ts_raw) < cutoff:
+                    stale_count += 1
+                    continue
+            except (TypeError, ValueError):
+                pass  # no parseable timestamp — allow it through
+
         slug = trade.get("slug") or trade.get("market") or ""
         token_id = trade.get("asset") or trade.get("asset_id") or trade.get("token_id") or ""
         outcome = trade.get("outcome") or "YES"
@@ -73,6 +99,9 @@ def get_trader_signals(trader: Trader) -> list[TradeSignal]:
             trader=trader,
             raw=trade,
         ))
+
+    if stale_count:
+        logger.debug(f"{trader.username}: dropped {stale_count} stale signal(s) (>{MAX_SIGNAL_AGE_HOURS}h old)")
     return signals
 
 

@@ -96,15 +96,37 @@ def _hours_to_close(metadata: dict) -> float | None:
     return (close_dt - datetime.now(tz=timezone.utc)).total_seconds() / 3600
 
 
-def _extract_yes_price(market_data: dict | None, fallback: float) -> float:
-    """Extract the current YES token price from Gamma API market metadata.
+def _extract_outcome_price(
+    market_data: dict | None,
+    outcome: str | None,
+    fallback: float,
+) -> float:
+    """Extract the live price for a specific outcome token from Gamma API metadata.
 
-    The Gamma API returns a ``tokens`` array where each element has an
-    ``outcome`` field and a ``price`` field (0–1 scale).  We return the YES
-    token price, or ``fallback`` if the data is missing or malformed.
+    Polymarket head-to-head markets (team vs team, player vs player) label their
+    tokens with the team/player name rather than "YES"/"NO".  We therefore do two
+    passes through the tokens array:
+
+      1. Match the stored outcome name exactly (case-insensitive).
+         e.g. outcome="Chicago White Sox" finds the White Sox token price.
+      2. Fall back to a "YES" token for standard binary prediction markets.
+
+    Returns ``fallback`` only if neither pass finds a valid price.
     """
     if market_data:
-        for token in market_data.get("tokens", []):
+        tokens = market_data.get("tokens", [])
+        # Pass 1: match the specific outcome (team/player name or "YES"/"NO")
+        if outcome:
+            for token in tokens:
+                if str(token.get("outcome", "")).upper() == outcome.upper():
+                    try:
+                        price = float(token.get("price", 0))
+                        if 0.0 < price < 1.0:
+                            return price
+                    except (TypeError, ValueError):
+                        pass
+        # Pass 2: binary YES token (standard prediction market format)
+        for token in tokens:
             if str(token.get("outcome", "")).upper() == "YES":
                 try:
                     price = float(token.get("price", 0))
@@ -212,8 +234,10 @@ def run_once(
         # avg_trader_price: weighted avg price top traders paid — used as estimated true probability
         avg_trader_price = agg.price
         trader_count = agg.trader_count
-        # yes_price: current live market price from Gamma API (fallback: trader avg)
-        yes_price = _extract_yes_price(metadata, avg_trader_price)
+        # yes_price: current live market price from Gamma API (fallback: trader avg).
+        # Use the first signal's outcome to match head-to-head markets by team/player name.
+        _candidate_outcome = agg.signals[0].outcome if agg.signals else None
+        yes_price = _extract_outcome_price(metadata, _candidate_outcome, avg_trader_price)
 
         # ── d. News + Kalshi ──────────────────────────────────────────────
         articles = fetch_market_news(title)
@@ -408,11 +432,12 @@ def run_once(
         # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
         metadata = market_filter.get_market_metadata(slug, token_id=pos.token_id) or {}
 
-        # Fetch live price: prefer slug-based metadata (always correct market),
-        # fall back to token_id midpoint (faster but token_id may be mismatched),
-        # then fall back to entry price.
+        # Fetch live price: prefer slug-based metadata (always correct market).
+        # Use pos.outcome to match team/player-name tokens in head-to-head markets;
+        # fall back to "YES" for binary markets; only then try the token_id midpoint
+        # (which may point to a different market if the signal token was mismatched).
         current_price = (
-            _extract_yes_price(metadata, None)
+            _extract_outcome_price(metadata, pos.outcome, None)
             or get_token_price(pos.token_id)
             or pos.avg_price
         )
