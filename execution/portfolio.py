@@ -28,6 +28,7 @@ import os
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
 
 # Add the project root to sys.path so it can find 'config' and 'utils' when run directly
@@ -77,13 +78,18 @@ class Portfolio:
         )
         self.realized_pnl: float = 0.0
         self.positions: dict[str, Position] = {}
+        # Slugs closed (stop-loss / take-profit) today — persisted so bot
+        # restarts within the same calendar day cannot re-enter these markets.
+        self._closed_date: str = date.today().isoformat()
+        self._closed_today: set[str] = set()
 
         if self.path.exists():
             self._load()
             logger.info(
                 f"[PORTFOLIO] loaded {self.path}: capital=${self.capital:,.2f}, "
                 f"{len(self.positions)} open position(s), "
-                f"realized P&L=${self.realized_pnl:,.2f}"
+                f"realized P&L=${self.realized_pnl:,.2f}, "
+                f"{len(self._closed_today)} slug(s) closed today"
             )
         else:
             logger.info(
@@ -171,6 +177,32 @@ class Portfolio:
         )
         return pnl
 
+    # ── Closed-today tracking ────────────────────────────────────────────────
+
+    def mark_closed_today(self, market_slug: str) -> None:
+        """Record that this slug was exited today (stop-loss or take-profit).
+
+        The set resets automatically when the calendar date rolls over so stale
+        blacklist entries never block the next trading day. Persisted to disk so
+        bot restarts within the same day honour the blacklist.
+        """
+        today = date.today().isoformat()
+        if today != self._closed_date:
+            # New calendar day — clear yesterday's blacklist.
+            self._closed_date = today
+            self._closed_today = set()
+        self._closed_today.add(market_slug)
+        self.save()
+
+    def is_closed_today(self, market_slug: str) -> bool:
+        """Return True if this slug was exited today and must not be re-entered."""
+        today = date.today().isoformat()
+        if today != self._closed_date:
+            # New calendar day — blacklist is stale, clear it.
+            self._closed_date = today
+            self._closed_today = set()
+        return market_slug in self._closed_today
+
     # ── Queries ──────────────────────────────────────────────────────────────
 
     def has_position(self, market_slug: str) -> bool:
@@ -207,6 +239,8 @@ class Portfolio:
             "capital": self.capital,
             "realized_pnl": self.realized_pnl,
             "positions": {slug: asdict(pos) for slug, pos in self.positions.items()},
+            "closed_date": self._closed_date,
+            "closed_today": sorted(self._closed_today),
         }
         # Atomic write: write to a temp file then rename over the real file.
         # os.replace() is atomic on Windows and POSIX — the file is either
@@ -227,3 +261,13 @@ class Portfolio:
         self.positions = {
             slug: Position(**pos) for slug, pos in data.get("positions", {}).items()
         }
+        # Restore closed-today blacklist. If the saved date is yesterday (or older),
+        # discard it — a new trading day starts fresh.
+        saved_date = data.get("closed_date", "")
+        today = date.today().isoformat()
+        if saved_date == today:
+            self._closed_date = today
+            self._closed_today = set(data.get("closed_today", []))
+        else:
+            self._closed_date = today
+            self._closed_today = set()

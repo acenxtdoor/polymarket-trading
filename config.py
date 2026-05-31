@@ -51,7 +51,7 @@ WATCHLIST_MIN_SCORE = 30.0                 # bot trades entries scoring at/above
 
 # Score = base(confidence) + conviction bonus + Kalshi-agree bonus, clamped to 0–100.
 # confidence == "skip" or Kalshi "disagree" force the score to 0 (excluded).
-WATCHLIST_CONFIDENCE_BASE = {"skip": 0.0, "low": 30.0, "medium": 60.0, "high": 85.0}
+WATCHLIST_CONFIDENCE_BASE = {"skip": 0.0, "low": 25.0, "medium": 60.0, "high": 85.0}
 WATCHLIST_CONVICTION_BASELINE = 2          # trader count at which the bonus starts
 WATCHLIST_CONVICTION_BONUS_PER_TRADER = 3.0
 WATCHLIST_CONVICTION_BONUS_CAP = 9.0

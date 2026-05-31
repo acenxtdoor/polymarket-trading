@@ -118,25 +118,19 @@ def _extract_outcome_price(
 
     Returns ``fallback`` only if neither pass finds a valid price.
     """
-    if market_data:
+    if market_data and outcome:
         tokens = market_data.get("tokens", [])
 
         def _valid(price: float) -> bool:
             return 0.0 <= price <= 1.0 if allow_resolved else 0.0 < price < 1.0
 
-        # Pass 1: match the specific outcome (team/player name or "YES"/"NO")
-        if outcome:
-            for token in tokens:
-                if str(token.get("outcome", "")).upper() == outcome.upper():
-                    try:
-                        price = float(token.get("price", 0))
-                        if _valid(price):
-                            return price
-                    except (TypeError, ValueError):
-                        pass
-        # Pass 2: binary YES token (standard prediction market format)
+        # Single-pass: match the exact outcome name (team/player for head-to-head
+        # markets, or "YES"/"NO" for binary prediction markets).
+        # The old Pass-2 "YES token" fallback has been removed: if the specific
+        # outcome doesn't match, we fall through to `fallback` rather than risk
+        # matching a "YES" token from a cached wrong market (price contamination).
         for token in tokens:
-            if str(token.get("outcome", "")).upper() == "YES":
+            if str(token.get("outcome", "")).upper() == outcome.upper():
                 try:
                     price = float(token.get("price", 0))
                     if _valid(price):
@@ -171,11 +165,8 @@ def run_once(
     session_trades: list[dict],
     session_skips: list[dict],
     session_flags: list[str],
-    closed_this_session: set[str] | None = None,
 ) -> None:
     """Execute one full iteration of the bot loop."""
-    if closed_this_session is None:
-        closed_this_session = set()
 
     # ── a. Fetch traders + signals ────────────────────────────────────────
     logger.info("=" * 60)
@@ -341,8 +332,8 @@ def run_once(
         if portfolio.has_position(entry.market_id):
             logger.info(f"[MAIN] {entry.market_id}: already holding position — skip")
             continue
-        if entry.market_id in closed_this_session:
-            logger.info(f"[MAIN] {entry.market_id}: closed by stop/take-profit this session — skip re-buy")
+        if portfolio.is_closed_today(entry.market_id):
+            logger.info(f"[MAIN] {entry.market_id}: closed by stop/take-profit today — skip re-buy")
             continue
 
         # Find the matching decision for token_id + Kelly inputs
@@ -380,7 +371,7 @@ def run_once(
                 f"below stop floor {stop_floor:.4f} (trader avg {entry.avg_trader_price:.4f}) "
                 "— skipping to avoid immediate stop-loss"
             )
-            closed_this_session.add(entry.market_id)  # permanent blacklist for this session
+            portfolio.mark_closed_today(entry.market_id)  # persisted blacklist for today
             continue
 
         result = executor.buy(
@@ -500,7 +491,7 @@ def run_once(
                     stop_manager.close_position(slug)
                 except KeyError:
                     pass
-                closed_this_session.add(slug)
+                portfolio.mark_closed_today(slug)  # persisted — survives restarts
             if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 title_for_note = _market_title(metadata) or slug
@@ -555,7 +546,7 @@ def run_once(
                     stop_manager.close_position(slug)
                 except KeyError:
                     pass
-                closed_this_session.add(slug)
+                portfolio.mark_closed_today(slug)  # persisted — survives restarts
             if sell_result is not None and sell_result.filled:
                 pnl = sell_result.size_dollars - pos_cost
                 logger.info(
@@ -692,7 +683,8 @@ def main() -> None:
     session_trades: list[dict] = []
     session_skips: list[dict] = []
     session_flags: list[str] = []
-    closed_this_session: set[str] = set()   # markets stopped-out/taken-profit — never re-buy
+    # closed_this_session is now persisted inside Portfolio.mark_closed_today /
+    # Portfolio.is_closed_today — no separate in-memory set needed here.
     last_summary_date: date = date.today()
 
     logger.info(
@@ -706,7 +698,6 @@ def main() -> None:
                 aggregator, engine, market_filter,
                 portfolio, executor, stop_manager,
                 session_trades, session_skips, session_flags,
-                closed_this_session,
             )
             last_summary_date = maybe_write_daily_summary(
                 session_trades, session_skips, session_flags,
