@@ -80,8 +80,10 @@ def generate_daily_summary(data: DailySummaryInput) -> str:
     try:
         with client.messages.stream(
             model=config.ANTHROPIC_MODEL,
-            max_tokens=512,
-            thinking={"type": "adaptive"},
+            max_tokens=1024,
+            # No thinking here — this is a simple summarisation task.
+            # Adaptive thinking eats into max_tokens and risks truncating the
+            # response or returning a 400 when the budget is too tight.
             system=[
                 {
                     "type": "text",

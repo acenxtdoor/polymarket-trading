@@ -658,12 +658,24 @@ def main() -> None:
     # starts empty and existing positions can never trigger a stop sell.
     # peak_price isn't persisted, so we seed peak = entry = avg_price —
     # the stop is active again from the original cost basis.
+    rehydrated = 0
+    skipped_rehydration = 0
     for slug, pos in portfolio.positions.items():
-        stop_manager.open_position(slug, pos.avg_price)
-    if portfolio.positions:
+        try:
+            stop_manager.open_position(slug, pos.avg_price)
+            rehydrated += 1
+        except ValueError as exc:
+            # avg_price outside (0, 1) — market may have already resolved.
+            # Log and skip rather than crashing the entire bot on startup.
+            logger.warning(
+                f"[MAIN] Skipping rehydration for {slug}: {exc} "
+                "(position will not trigger trailing stop until manually resolved)"
+            )
+            skipped_rehydration += 1
+    if rehydrated:
         logger.info(
-            f"[MAIN] Rehydrated {len(portfolio.positions)} trailing stop(s) "
-            "from portfolio"
+            f"[MAIN] Rehydrated {rehydrated} trailing stop(s) from portfolio"
+            + (f" ({skipped_rehydration} skipped — invalid avg_price)" if skipped_rehydration else "")
         )
 
     executor = OrderExecutor(portfolio, market_filter)
@@ -699,6 +711,11 @@ def main() -> None:
                 portfolio, executor, stop_manager,
                 session_trades, session_skips, session_flags,
             )
+            # Evict pending signals older than 48 h (matches the staleness window
+            # in traders.py). Without this, single-trader signals that never got a
+            # second confirmation accumulate in memory forever and could fire stale
+            # entries if _EXECUTE_THRESHOLD is ever raised above 1.
+            aggregator.expire_pending(max_age_seconds=48 * 3600)
             last_summary_date = maybe_write_daily_summary(
                 session_trades, session_skips, session_flags,
                 portfolio, last_summary_date,
