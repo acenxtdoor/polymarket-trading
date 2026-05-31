@@ -62,7 +62,7 @@ from intelligence.summarizer import DailySummaryInput, generate_daily_summary
 from intelligence.watchlist import MarketCandidate, build_watchlist
 from news.newsapi import fetch_market_news
 from obsidian.writer import ensure_vault, update_trade_outcome, update_trade_price, write_daily_report, write_skip, write_trade
-from polymarket.api import get_token_price
+from polymarket.api import get_market as _get_market_direct
 from polymarket.traders import collect_all_signals, fetch_top_traders
 from strategy.conviction import ConvictionEngine, SignalAggregator
 from strategy.kalshi import get_kalshi_signal
@@ -438,22 +438,24 @@ def run_once(
                 pass
             continue
 
-        # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
-        metadata = market_filter.get_market_metadata(slug, token_id=pos.token_id) or {}
-
-        # Fetch live price exclusively from slug-based Gamma metadata.
-        # allow_resolved=True so prices of 0.0 (loser) and 1.0 (winner) are
-        # returned correctly for markets that have already resolved.
-        #
-        # IMPORTANT: get_token_price(pos.token_id) is intentionally NOT used here.
-        # The token_id stored in a position comes from the trader signal and may
-        # point to a completely different market (cross-contamination). Using it
-        # as a price fallback injects that other market's price into every exit
-        # decision, generating fake P&L. If the slug-based price is unavailable,
-        # we hold at avg_price (no exit triggered) rather than guess wrong.
-        current_price = _extract_outcome_price(
-            metadata, pos.outcome, pos.avg_price, allow_resolved=True
-        )
+        # Direct slug-only API call — bypasses the market filter cache entirely.
+        # No token_id parameter means the Gamma API cannot fall back to a
+        # different market if the slug is unrecognised. No YES fallback means
+        # we cannot accidentally match another market's YES token.
+        # If the slug returns nothing, or the outcome token isn't found, we
+        # default to avg_price (hold, no exit) rather than guess wrong.
+        _exit_meta = _get_market_direct(slug) or {}
+        metadata = _exit_meta  # still used below for market title / Obsidian update
+        current_price = pos.avg_price  # safe default: no exit if price unavailable
+        for _tok in _exit_meta.get("tokens", []):
+            if str(_tok.get("outcome", "")).upper() == pos.outcome.upper():
+                try:
+                    _p = float(_tok.get("price", 0))
+                    if 0.0 <= _p <= 1.0:
+                        current_price = _p
+                except (TypeError, ValueError):
+                    pass
+                break  # stop after first outcome match — never read another market's tokens
 
         # Push live price to the Obsidian trade note so the dashboard stays current.
         update_trade_price(
