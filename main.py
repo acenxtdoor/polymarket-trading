@@ -408,11 +408,13 @@ def run_once(
         # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
         metadata = market_filter.get_market_metadata(slug, token_id=pos.token_id) or {}
 
-        # Fetch live price: Gamma API bestBid/bestAsk midpoint via token_id,
-        # then fall back to the YES token price embedded in market metadata.
+        # Fetch live price: prefer slug-based metadata (always correct market),
+        # fall back to token_id midpoint (faster but token_id may be mismatched),
+        # then fall back to entry price.
         current_price = (
-            get_token_price(pos.token_id)
-            or _extract_yes_price(metadata, pos.avg_price)
+            _extract_yes_price(metadata, None)
+            or get_token_price(pos.token_id)
+            or pos.avg_price
         )
 
         # Push live price to the Obsidian trade note so the dashboard stays current.

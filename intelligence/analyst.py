@@ -116,7 +116,7 @@ def assess_market(
         response = client.messages.create(
             model=config.ANTHROPIC_MODEL,
             max_tokens=512,
-            output_config={"format": {"type": "json_schema", "name": "assessment", "schema": _SCHEMA}},
+            output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
             system=[
                 {
                     "type": "text",
