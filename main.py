@@ -100,6 +100,7 @@ def _extract_outcome_price(
     market_data: dict | None,
     outcome: str | None,
     fallback: float,
+    allow_resolved: bool = False,
 ) -> float:
     """Extract the live price for a specific outcome token from Gamma API metadata.
 
@@ -111,17 +112,25 @@ def _extract_outcome_price(
          e.g. outcome="Chicago White Sox" finds the White Sox token price.
       2. Fall back to a "YES" token for standard binary prediction markets.
 
+    allow_resolved=True widens the accepted range from (0, 1) to [0, 1] so that
+    prices from resolved markets (winner=1.0, loser=0.0) are returned correctly.
+    Use this only on the EXIT side — never when assessing a market for entry.
+
     Returns ``fallback`` only if neither pass finds a valid price.
     """
     if market_data:
         tokens = market_data.get("tokens", [])
+
+        def _valid(price: float) -> bool:
+            return 0.0 <= price <= 1.0 if allow_resolved else 0.0 < price < 1.0
+
         # Pass 1: match the specific outcome (team/player name or "YES"/"NO")
         if outcome:
             for token in tokens:
                 if str(token.get("outcome", "")).upper() == outcome.upper():
                     try:
                         price = float(token.get("price", 0))
-                        if 0.0 < price < 1.0:
+                        if _valid(price):
                             return price
                     except (TypeError, ValueError):
                         pass
@@ -130,7 +139,7 @@ def _extract_outcome_price(
             if str(token.get("outcome", "")).upper() == "YES":
                 try:
                     price = float(token.get("price", 0))
-                    if 0.0 < price < 1.0:
+                    if _valid(price):
                         return price
                 except (TypeError, ValueError):
                     pass
@@ -432,14 +441,18 @@ def run_once(
         # Pass token_id so slug-based cache misses fall back to Gamma token lookup.
         metadata = market_filter.get_market_metadata(slug, token_id=pos.token_id) or {}
 
-        # Fetch live price: prefer slug-based metadata (always correct market).
-        # Use pos.outcome to match team/player-name tokens in head-to-head markets;
-        # fall back to "YES" for binary markets; only then try the token_id midpoint
-        # (which may point to a different market if the signal token was mismatched).
-        current_price = (
-            _extract_outcome_price(metadata, pos.outcome, None)
-            or get_token_price(pos.token_id)
-            or pos.avg_price
+        # Fetch live price exclusively from slug-based Gamma metadata.
+        # allow_resolved=True so prices of 0.0 (loser) and 1.0 (winner) are
+        # returned correctly for markets that have already resolved.
+        #
+        # IMPORTANT: get_token_price(pos.token_id) is intentionally NOT used here.
+        # The token_id stored in a position comes from the trader signal and may
+        # point to a completely different market (cross-contamination). Using it
+        # as a price fallback injects that other market's price into every exit
+        # decision, generating fake P&L. If the slug-based price is unavailable,
+        # we hold at avg_price (no exit triggered) rather than guess wrong.
+        current_price = _extract_outcome_price(
+            metadata, pos.outcome, pos.avg_price, allow_resolved=True
         )
 
         # Push live price to the Obsidian trade note so the dashboard stays current.
@@ -450,10 +463,12 @@ def run_once(
         )
 
         # ── Price sanity check — reject obviously corrupt prices ──────────
-        # If current_price is >10× the entry price or >0.99, the price feed is
-        # likely returning a value from a different market (cross-contamination).
+        # If current_price is >10× the entry price, the price feed is likely
+        # returning a value from a different market (cross-contamination).
+        # Exception: price == 1.0 is legitimate for a fully-resolved winning
+        # position — do NOT block it.
         # Skip all exits for this tick rather than realize a fake P&L.
-        if current_price > min(pos.avg_price * 10, 0.99):
+        if current_price < 1.0 and current_price > pos.avg_price * 10:
             logger.warning(
                 f"[MAIN] {slug}: price sanity fail — current={current_price:.4f} "
                 f"is implausible vs entry={pos.avg_price:.4f} — skipping exit this tick"
