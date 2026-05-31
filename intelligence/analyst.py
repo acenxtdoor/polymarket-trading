@@ -49,6 +49,7 @@ Do not include any text outside the JSON object.
 
 _SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "confidence": {"type": "string", "enum": ["high", "medium", "low", "skip"]},
         "summary": {"type": "string"},
@@ -115,7 +116,6 @@ def assess_market(
         response = client.messages.create(
             model=config.ANTHROPIC_MODEL,
             max_tokens=512,
-            thinking={"type": "adaptive"},
             output_config={"format": {"type": "json_schema", "name": "assessment", "schema": _SCHEMA}},
             system=[
                 {

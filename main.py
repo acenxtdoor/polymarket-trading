@@ -422,6 +422,17 @@ def run_once(
             market_id=slug,
         )
 
+        # ── Price sanity check — reject obviously corrupt prices ──────────
+        # If current_price is >10× the entry price or >0.99, the price feed is
+        # likely returning a value from a different market (cross-contamination).
+        # Skip all exits for this tick rather than realize a fake P&L.
+        if current_price > min(pos.avg_price * 10, 0.99):
+            logger.warning(
+                f"[MAIN] {slug}: price sanity fail — current={current_price:.4f} "
+                f"is implausible vs entry={pos.avg_price:.4f} — skipping exit this tick"
+            )
+            continue
+
         # ── Take-profit check (runs before trailing stop) ─────────────────
         take_profit_price = pos.avg_price * (1.0 + config.TAKE_PROFIT_PCT)
         if current_price >= take_profit_price:
