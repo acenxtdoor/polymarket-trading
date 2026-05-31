@@ -28,7 +28,7 @@ KALSHI_DISAGREE_MULTIPLIER = 0.0
 KALSHI_NO_MATCH_MULTIPLIER = 1.0
 MARKET_CACHE_TTL = 300         # 5 minutes
 
-REQUEST_TIMEOUT = 10
+REQUEST_TIMEOUT = 30
 
 # Execution / portfolio
 DRY_RUN = True                 # paper trading — no real orders are ever placed
