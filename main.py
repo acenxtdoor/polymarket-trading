@@ -429,13 +429,21 @@ def run_once(
                 pass
             continue
 
-        # Direct slug-only API call — bypasses the market filter cache entirely.
-        # No token_id parameter means the Gamma API cannot fall back to a
-        # different market if the slug is unrecognised. No YES fallback means
-        # we cannot accidentally match another market's YES token.
-        # If the slug returns nothing, or the outcome token isn't found, we
-        # default to avg_price (hold, no exit) rather than guess wrong.
+        # Exit pricing — direct API call, bypasses market filter cache entirely.
+        #
+        # Strategy: try the slug first (clean path). If Gamma returns nothing
+        # (Data-API event slugs often differ from Gamma question slugs), retry
+        # with token_id so the lookup actually resolves.
+        #
+        # Contamination is blocked by the outcome-name check below — NOT by
+        # withholding token_id. If token_id resolves to the wrong market, that
+        # market's tokens will have different outcome names (e.g. a soccer
+        # market won't contain "Andrey Rublev"), the match fails, and we fall
+        # back to avg_price (hold) rather than use a corrupt price.
         _exit_meta = _get_market_direct(slug) or {}
+        if not _exit_meta.get("tokens"):
+            # Slug returned nothing — retry via token_id fallback.
+            _exit_meta = _get_market_direct(slug, token_id=pos.token_id) or {}
         metadata = _exit_meta  # still used below for market title / Obsidian update
         current_price = pos.avg_price  # safe default: no exit if price unavailable
         for _tok in _exit_meta.get("tokens", []):
