@@ -116,7 +116,14 @@ class Portfolio:
         if dollars <= 0:
             raise ValueError(f"dollars must be > 0, got {dollars}")
         if not (0.0 < fill_price < 1.0):
-            raise ValueError(f"fill_price must be in (0, 1), got {fill_price}")
+            # Clamp rather than crash — slippage model can push slightly outside (0,1)
+            # for near-zero or near-one probability markets.
+            clamped = max(min(fill_price, 0.9999), 0.0001)
+            logger.warning(
+                f"[PORTFOLIO] fill_price {fill_price:.6f} outside (0,1) — "
+                f"clamped to {clamped:.4f}"
+            )
+            fill_price = clamped
         if dollars > self.capital + 1e-9:
             raise ValueError(
                 f"insufficient capital: need ${dollars:,.2f}, have ${self.capital:,.2f}"
