@@ -501,6 +501,7 @@ def run_once(
             })
 
     # ── g. Trailing stop checks ───────────────────────────────────────────
+    _live_prices: dict[str, float] = {}   # slug → current_price, used for unrealized P&L log
     open_slugs = list(stop_manager.open_positions.keys())
     for slug in open_slugs:
         # Fetch position first so we have token_id for the metadata lookup.
@@ -568,11 +569,16 @@ def run_once(
             if _resolved_price is not None:
                 current_price = _resolved_price
 
-        # Push live price to the Obsidian trade note so the dashboard stays current.
+        # Track live price for end-of-run unrealized P&L log.
+        _live_prices[slug] = current_price
+
+        # Push live price + unrealized P&L to the Obsidian trade note.
+        _unr = pos.unrealized_pnl(current_price)
         update_trade_price(
             market_title=_market_title(metadata) or slug,
             current_price=current_price,
             market_id=slug,
+            unrealized_pnl=_unr,
         )
 
         # ── Price sanity check — reject obviously corrupt prices ──────────
@@ -710,10 +716,12 @@ def run_once(
                     f"[MAIN] Stop-loss sell rejected for {slug}: {sell_result.reason}"
                 )
 
+    _total_unrealized = portfolio.unrealized_pnl(_live_prices)
     logger.info(
         f"Run complete — capital=${portfolio.capital:,.2f}  "
         f"open={portfolio.open_count}  "
-        f"realized P&L=${portfolio.realized_pnl:,.2f}"
+        f"realized P&L=${portfolio.realized_pnl:,.2f}  "
+        f"unrealized P&L=${_total_unrealized:+,.2f}"
     )
 
 

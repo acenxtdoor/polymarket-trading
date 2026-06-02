@@ -38,6 +38,7 @@ def trade_note(
     trade_date: Optional[date] = None,
     take_profit: Optional[float] = None,
     current_price: Optional[float] = None,
+    unrealized_pnl: Optional[float] = None,
 ) -> str:
     d = trade_date or date.today()
     tags_list = tags or ["trade", action.lower()]
@@ -45,6 +46,7 @@ def trade_note(
     pnl_str = f"{pnl:.2f}" if pnl is not None else "0"
     tp = take_profit if take_profit is not None else entry_price
     cp = current_price if current_price is not None else entry_price
+    upnl = unrealized_pnl if unrealized_pnl is not None else 0.0
 
     return f"""\
 ---
@@ -59,6 +61,7 @@ position_size: {position_size:.2f}
 entry_price: {entry_price:.4f}
 take_profit: {tp:.4f}
 current_price: {cp:.4f}
+unrealized_pnl: {upnl:.2f}
 claude_confidence: "{_yaml_str(claude_confidence)}"
 claude_flags: {_fmt_list(claude_flags)}
 traders: {_fmt_list(traders)}
@@ -72,7 +75,7 @@ tags: {_fmt_list(tags_list)}
 **Date:** {d.isoformat()}
 **Action:** {action} | **Conviction:** {conviction} trader(s) | **Kalshi:** {kalshi_signal}
 **Kelly fraction:** {kelly_fraction:.2%} → **Position size:** ${position_size:,.2f}
-**Entry price:** {entry_price:.4f} | **Take-profit:** {tp:.4f} | **Current:** {cp:.4f}
+**Entry price:** {entry_price:.4f} | **Take-profit:** {tp:.4f} | **Current:** {cp:.4f} | **Unr. P&L:** ${upnl:+,.2f}
 
 ## JARVIS Assessment
 

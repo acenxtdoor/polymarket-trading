@@ -19,10 +19,21 @@ WHERE pnl != null OR outcome = "open"
 GROUP BY true
 ```
 
+## Unrealized P&L
+
+```dataview
+TABLE WITHOUT ID
+  sum(rows.unrealized_pnl) AS "Total Unrealized P&L ($)",
+  length(rows) AS "Open Positions"
+FROM "Trades"
+WHERE outcome = "open"
+GROUP BY true
+```
+
 ## Active Positions
 
 ```dataview
-TABLE market_title, entry_price, position_size, claude_confidence, traders
+TABLE market_title, entry_price, current_price, position_size, unrealized_pnl AS "Unr. P&L ($)", traders
 FROM "Trades"
 WHERE outcome = "open"
 SORT date DESC

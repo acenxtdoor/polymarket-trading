@@ -146,8 +146,9 @@ def update_trade_price(
     current_price: float,
     trade_date: Optional[date] = None,
     market_id: Optional[str] = None,
+    unrealized_pnl: Optional[float] = None,
 ) -> bool:
-    """Update the current_price field in an open trade note (called every loop tick)."""
+    """Update current_price and unrealized_pnl in an open trade note (called every loop tick)."""
     d = trade_date or date.today()
     filename = f"{d.isoformat()}-{_safe_filename(market_title)}.md"
     note_path = _vault() / "Trades" / filename
@@ -167,8 +168,10 @@ def update_trade_price(
 
     text = note_path.read_text(encoding="utf-8")
     text = re.sub(r'current_price: -?[\d]+(?:\.[\d]+)?', f'current_price: {current_price:.4f}', text)
-    # Also update the body line
-    text = re.sub(r'\*\*Current:\*\* [\d\.]+', f'**Current:** {current_price:.4f}', text)
+    text = re.sub(r'\*\*Current:\*\* -?[\d\.]+', f'**Current:** {current_price:.4f}', text)
+    if unrealized_pnl is not None:
+        text = re.sub(r'unrealized_pnl: -?[\d]+(?:\.[\d]+)?', f'unrealized_pnl: {unrealized_pnl:.2f}', text)
+        text = re.sub(r'\*\*Unr\. P&L:\*\* \$[+\-]?[\d,\.]+', f'**Unr. P&L:** ${unrealized_pnl:+,.2f}', text)
     note_path.write_text(text, encoding="utf-8")
     return True
 
