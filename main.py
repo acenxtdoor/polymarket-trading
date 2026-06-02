@@ -139,13 +139,21 @@ def _extract_outcome_price(
                 except (TypeError, ValueError):
                     pass
 
-        # Fallback: some Gamma responses omit tokens[] and encode prices as
-        # JSON strings in outcomes / outcomePrices instead.
+        # Fallback: some Gamma responses omit tokens[] and return prices in
+        # outcomes / outcomePrices instead (list or JSON-encoded string).
         if not tokens:
             try:
                 import json as _json
-                _outcomes = _json.loads(market_data.get("outcomes", "[]"))
-                _prices   = _json.loads(market_data.get("outcomePrices", "[]"))
+
+                def _to_list(val):
+                    if isinstance(val, list):
+                        return val
+                    if isinstance(val, str) and val:
+                        return _json.loads(val)
+                    return []
+
+                _outcomes = _to_list(market_data.get("outcomes"))
+                _prices   = _to_list(market_data.get("outcomePrices"))
                 for _out, _pstr in zip(_outcomes, _prices):
                     if str(_out).upper() == outcome.upper():
                         _p = float(_pstr)
@@ -547,13 +555,23 @@ def run_once(
                     pass
                 break  # stop after first outcome match — never read another market's tokens
 
-        # Fallback A: parse outcomePrices / outcomes JSON strings (Gamma returns
-        # these instead of a tokens[] array for some markets).
+        # Fallback A: parse outcomePrices / outcomes (Gamma omits tokens[] for
+        # some markets and returns prices here instead).  The field can arrive
+        # as a Python list (already parsed by requests) OR as a JSON string —
+        # handle both so the TypeError from json.loads(list) doesn't swallow it.
         if current_price == pos.avg_price:
             try:
                 import json as _json
-                _outcomes = _json.loads(_exit_meta.get("outcomes", "[]"))
-                _prices   = _json.loads(_exit_meta.get("outcomePrices", "[]"))
+
+                def _to_list(val):
+                    if isinstance(val, list):
+                        return val
+                    if isinstance(val, str) and val:
+                        return _json.loads(val)
+                    return []
+
+                _outcomes = _to_list(_exit_meta.get("outcomes"))
+                _prices   = _to_list(_exit_meta.get("outcomePrices"))
                 for _out, _pstr in zip(_outcomes, _prices):
                     if str(_out).upper() == pos.outcome.upper():
                         _p2 = float(_pstr)
