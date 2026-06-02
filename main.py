@@ -138,6 +138,22 @@ def _extract_outcome_price(
                         return price
                 except (TypeError, ValueError):
                     pass
+
+        # Fallback: some Gamma responses omit tokens[] and encode prices as
+        # JSON strings in outcomes / outcomePrices instead.
+        if not tokens:
+            try:
+                import json as _json
+                _outcomes = _json.loads(market_data.get("outcomes", "[]"))
+                _prices   = _json.loads(market_data.get("outcomePrices", "[]"))
+                for _out, _pstr in zip(_outcomes, _prices):
+                    if str(_out).upper() == outcome.upper():
+                        _p = float(_pstr)
+                        if _valid(_p):
+                            return _p
+                        break
+            except (ValueError, TypeError):
+                pass
     return fallback
 
 
@@ -530,9 +546,23 @@ def run_once(
                     pass
                 break  # stop after first outcome match — never read another market's tokens
 
-        # If the live-price lookup fell back to entry price, check whether the
-        # market has resolved.  _get_resolved_price() returns 0.0 or 1.0 when
-        # resolution is confirmed so the trailing stop / take-profit can fire.
+        # Fallback A: parse outcomePrices / outcomes JSON strings (Gamma returns
+        # these instead of a tokens[] array for some markets).
+        if current_price == pos.avg_price:
+            try:
+                import json as _json
+                _outcomes = _json.loads(_exit_meta.get("outcomes", "[]"))
+                _prices   = _json.loads(_exit_meta.get("outcomePrices", "[]"))
+                for _out, _pstr in zip(_outcomes, _prices):
+                    if str(_out).upper() == pos.outcome.upper():
+                        _p2 = float(_pstr)
+                        if 0.0 <= _p2 <= 1.0:
+                            current_price = _p2
+                        break
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback B: market has resolved — determine 0.0/1.0 settlement price.
         if current_price == pos.avg_price:
             _resolved_price = _get_resolved_price(_exit_meta, pos.outcome, slug)
             if _resolved_price is not None:
