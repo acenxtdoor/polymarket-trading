@@ -487,7 +487,7 @@ def run_once(
                 kelly_fraction=kelly_f,
                 position_size=size,
                 entry_price=result.fill_price,
-                take_profit=result.fill_price * (1.0 + config.TAKE_PROFIT_PCT),
+                take_profit=min(result.fill_price * (1.0 + config.TAKE_PROFIT_PCT), 0.99),
                 current_price=entry.yes_price,
                 claude_confidence=entry.confidence,
                 claude_summary=entry.summary,
@@ -589,7 +589,7 @@ def run_once(
             continue
 
         # ── Take-profit check (runs before trailing stop) ─────────────────
-        take_profit_price = pos.avg_price * (1.0 + config.TAKE_PROFIT_PCT)
+        take_profit_price = min(pos.avg_price * (1.0 + config.TAKE_PROFIT_PCT), 0.99)
         if current_price >= take_profit_price:
             pos_cost = pos.cost
             pos_avg_price = pos.avg_price
