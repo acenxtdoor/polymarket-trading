@@ -61,9 +61,7 @@ _load_dotenv()
 import config
 from execution.order import OrderExecutor
 from execution.portfolio import Portfolio
-from intelligence.summarizer import DailySummaryInput, generate_daily_summary
 from intelligence.watchlist import MarketCandidate, build_watchlist
-from news.newsapi import fetch_market_news
 from obsidian.writer import ensure_vault, update_trade_outcome, update_trade_price, write_daily_report, write_skip, write_trade
 from polymarket.api import get_market as _get_market_direct
 from polymarket.traders import collect_all_signals, fetch_top_traders
@@ -145,13 +143,7 @@ def _extract_outcome_price(
 
 def _validate_env() -> None:
     """Warn about missing optional keys; abort if nothing useful can run."""
-    if not config.ANTHROPIC_API_KEY:
-        logger.warning(
-            "ANTHROPIC_API_KEY not set — JARVIS intelligence offline. "
-            "Bot will trade on signals alone."
-        )
-    if not config.NEWSAPI_KEY:
-        logger.warning("NEWSAPI_KEY not set — news enrichment disabled.")
+    logger.info("JARVIS intelligence layer offline — trading on conviction signals only.")
     if config.DRY_RUN:
         logger.info("DRY_RUN=True — no real orders will be placed.")
 
@@ -242,8 +234,7 @@ def run_once(
         _candidate_outcome = agg.signals[0].outcome if agg.signals else None
         yes_price = _extract_outcome_price(metadata, _candidate_outcome, avg_trader_price)
 
-        # ── d. News + Kalshi ──────────────────────────────────────────────
-        articles = fetch_market_news(title)
+        # ── d. Kalshi ─────────────────────────────────────────────────────
         kalshi_result = get_kalshi_signal(title, yes_price)
 
         if kalshi_result.multiplier == 0.0:
@@ -278,7 +269,6 @@ def run_once(
             avg_trader_price=avg_trader_price,
             kalshi_signal=kalshi_result.signal,
             hours_to_resolution=hours,
-            articles=articles,
         ))
 
     # ── e. JARVIS watchlist ───────────────────────────────────────────────
@@ -633,14 +623,14 @@ def maybe_write_daily_summary(
     if today <= last_summary_date:
         return last_summary_date
 
-    logger.info("[MAIN] Generating daily JARVIS summary...")
-    summary_text = generate_daily_summary(DailySummaryInput(
-        trades_placed=session_trades,
-        trades_skipped=session_skips,
-        flags_raised=list(set(session_flags)),
-        capital=portfolio.capital,
-        run_date=last_summary_date,
-    ))
+    logger.info("[MAIN] Generating daily summary...")
+    summary_text = (
+        f"**{last_summary_date.isoformat()}** — "
+        f"{len(session_trades)} trade(s) placed, "
+        f"{len(session_skips)} skipped. "
+        f"Capital: ${portfolio.capital:,.2f}. "
+        f"Running on trader signals only (JARVIS offline)."
+    )
     write_daily_report(
         summary_text=summary_text,
         trades_count=len(session_trades),

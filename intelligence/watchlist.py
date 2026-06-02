@@ -23,7 +23,7 @@ from datetime import date, datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config
-from intelligence.analyst import MarketAssessment, assess_markets_parallel
+from intelligence.analyst import MarketAssessment
 from news.newsapi import NewsArticle
 from strategy.kalshi import AGREE, DISAGREE
 from utils.logger import get_logger
@@ -134,18 +134,17 @@ def build_watchlist(
         f"{dropped_kalshi} Kalshi-disagree, {len(survivors)} to assess"
     )
 
-    assessments = assess_markets_parallel([
-        {
-            "market_id": c.market_id,
-            "market_title": c.market_title,
-            "yes_price": c.yes_price,
-            "articles": c.articles,
-            "trader_count": c.trader_count,
-            "avg_trader_price": c.avg_trader_price,
-            "kalshi_signal": c.kalshi_signal,
-        }
+    # JARVIS offline — stub every assessment as "medium" so scoring
+    # falls back to pure conviction + Kalshi.  Re-enable when credits return.
+    assessments = {
+        c.market_id: MarketAssessment(
+            market_id=c.market_id,
+            confidence="medium",
+            summary="JARVIS offline — running on trader signals only.",
+            flags=[],
+        )
         for c in survivors
-    ])
+    }
 
     entries: list[WatchlistEntry] = []
     for c in survivors:
