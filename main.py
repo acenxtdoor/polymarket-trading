@@ -441,8 +441,15 @@ def run_once(
         # market won't contain "Andrey Rublev"), the match fails, and we fall
         # back to avg_price (hold) rather than use a corrupt price.
         _exit_meta = _get_market_direct(slug) or {}
-        if not _exit_meta.get("tokens"):
-            # Slug returned nothing — retry via token_id fallback.
+        # Retry with token_id if the slug result has no tokens OR if the
+        # expected outcome token is absent (Gamma may return a different market
+        # for the same event — e.g. an over/under instead of the moneyline).
+        # The outcome-name check below still guards against wrong-market prices.
+        _outcome_in_meta = any(
+            str(t.get("outcome", "")).upper() == pos.outcome.upper()
+            for t in _exit_meta.get("tokens", [])
+        )
+        if not _outcome_in_meta:
             _exit_meta = _get_market_direct(slug, token_id=pos.token_id) or {}
         metadata = _exit_meta  # still used below for market title / Obsidian update
         current_price = pos.avg_price  # safe default: no exit if price unavailable
