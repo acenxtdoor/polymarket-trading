@@ -108,7 +108,7 @@ class OrderExecutor:
                 fill_price=slip.estimated_fill, slippage_pct=slip.slippage_pct,
             )
 
-        fill_price = slip.estimated_fill
+        fill_price = min(slip.estimated_fill, 0.9999)  # prediction markets cap at 1.0
         if not self.dry_run:
             return self._live_buy(market_slug, token_id, outcome, fill_price, size_dollars)
 
