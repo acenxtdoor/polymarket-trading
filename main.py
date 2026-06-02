@@ -48,7 +48,10 @@ def _load_dotenv(path: str = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        os.environ.setdefault(key.strip(), val.strip())
+        # Always apply .env value; only skip if key is already set to a non-empty value
+        k, v = key.strip(), val.strip().strip('"').strip("'")
+        if not os.environ.get(k):
+            os.environ[k] = v
 
 
 _load_dotenv()
