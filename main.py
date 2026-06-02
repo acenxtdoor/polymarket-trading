@@ -141,6 +141,80 @@ def _extract_outcome_price(
     return fallback
 
 
+def _get_resolved_price(exit_meta: dict, outcome: str, slug: str) -> float | None:
+    """Determine the final settlement price for a position in a resolved market.
+
+    Called only when the normal live-price lookup returns the entry-price fallback,
+    meaning Gamma couldn't find a live price for our outcome token.  At that point
+    the market is likely archived — this function tries to confirm resolution and
+    return the correct 0.0 (loss) or 1.0 (win) settlement price.
+
+    Returns:
+        float — 0.0 or 1.0 when resolution is confirmed
+        None  — market not yet resolved or outcome indeterminate (hold position)
+    """
+    from strategy.market_filter import _parse_close_time
+
+    # ── 1. Check metadata flags ───────────────────────────────────────────────
+    is_resolved = bool(
+        exit_meta.get("closed")
+        or exit_meta.get("is_closed")
+        or str(exit_meta.get("status", "")).lower() in ("closed", "resolved", "cancelled")
+    )
+
+    # ── 2. Fall back to timing: >4 h past close → treat as resolved ───────────
+    if not is_resolved:
+        close_dt = _parse_close_time(exit_meta)
+        if close_dt is not None:
+            hours_past = (datetime.now(tz=timezone.utc) - close_dt).total_seconds() / 3600
+            is_resolved = hours_past > 4.0
+
+    if not is_resolved:
+        return None
+
+    tokens = exit_meta.get("tokens", [])
+
+    # ── 3. Direct match: find our outcome token at a settled price (0 or 1) ───
+    for tok in tokens:
+        if str(tok.get("outcome", "")).upper() == outcome.upper():
+            try:
+                p = float(tok.get("price", -1))
+                if 0.0 <= p <= 1.0:
+                    logger.info(
+                        f"[MAIN] {slug}: resolved — outcome='{outcome}' settled at {p:.4f}"
+                    )
+                    return p
+            except (TypeError, ValueError):
+                pass
+
+    # ── 4. Indirect: find the winner token; if it's not ours we lost ──────────
+    for tok in tokens:
+        try:
+            p = float(tok.get("price", -1))
+        except (TypeError, ValueError):
+            continue
+        if p >= 0.95:   # winner settled at ~1.0
+            tok_outcome = str(tok.get("outcome", "")).upper()
+            if outcome and tok_outcome == outcome.upper():
+                logger.info(f"[MAIN] {slug}: resolved — '{outcome}' is the winner (1.0)")
+                return 1.0
+            else:
+                logger.info(
+                    f"[MAIN] {slug}: resolved — winner is '{tok_outcome}', "
+                    f"our outcome '{outcome}' lost (0.0)"
+                )
+                return 0.0
+
+    # ── 5. No token data but market confirmed past close → assume loss ─────────
+    # If the market is archived and Gamma returns no tokens, we have no way to
+    # know the outcome.  Closing at 0.0 is conservative but unblocks the position.
+    logger.warning(
+        f"[MAIN] {slug}: market past close time with no token data — "
+        f"closing at 0.0 to unblock stuck position (check manually if in doubt)"
+    )
+    return 0.0
+
+
 def _validate_env() -> None:
     """Warn about missing optional keys; abort if nothing useful can run."""
     logger.info("JARVIS intelligence layer offline — trading on conviction signals only.")
@@ -455,6 +529,14 @@ def run_once(
                 except (TypeError, ValueError):
                     pass
                 break  # stop after first outcome match — never read another market's tokens
+
+        # If the live-price lookup fell back to entry price, check whether the
+        # market has resolved.  _get_resolved_price() returns 0.0 or 1.0 when
+        # resolution is confirmed so the trailing stop / take-profit can fire.
+        if current_price == pos.avg_price:
+            _resolved_price = _get_resolved_price(_exit_meta, pos.outcome, slug)
+            if _resolved_price is not None:
+                current_price = _resolved_price
 
         # Push live price to the Obsidian trade note so the dashboard stays current.
         update_trade_price(
