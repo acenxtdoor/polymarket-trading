@@ -465,6 +465,21 @@ def run_once(
             portfolio.mark_closed_today(entry.market_id)  # persisted blacklist for today
             continue
 
+        # Reject if max possible gain is smaller than the trailing stop risk.
+        # For a position at price P: max gain = 1.0 - P, stop risk = P * TRAILING_STOP_PCT.
+        # Entering when max_gain < stop_risk guarantees a net-negative expected outcome
+        # even if the position wins — any normal volatility fires the stop before resolution.
+        # Break-even: price <= 1 / (1 + TRAILING_STOP_PCT) ≈ 0.909 at 10% stop.
+        _max_gain = 1.0 - entry.yes_price
+        _stop_risk = entry.yes_price * config.TRAILING_STOP_PCT
+        if _max_gain < _stop_risk:
+            logger.info(
+                f"[MAIN] {entry.market_id}: skipping — max gain {_max_gain:.3f} "
+                f"< stop risk {_stop_risk:.3f} at price {entry.yes_price:.4f}. "
+                "Upside too small relative to trailing stop."
+            )
+            continue
+
         result = executor.buy(
             market_slug=entry.market_id,
             token_id=token_id,
