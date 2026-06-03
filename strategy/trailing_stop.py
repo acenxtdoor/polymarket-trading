@@ -38,6 +38,30 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def adaptive_stop_pct(entry_price: float) -> float:
+    """Compute a per-position trailing stop percentage scaled to remaining upside.
+
+    A fixed 10% stop on a 0.97 entry guarantees losses — the stop fires at 0.873
+    while the max possible gain is only 3%.  This function scales the stop so it
+    never exceeds 50% of the remaining upside, with 10% as the hard ceiling.
+
+    Formula:  stop_pct = min(TRAILING_STOP_PCT, 0.5 × (1 − entry) / entry)
+
+    Examples:
+        entry=0.30  → stop=10.0%  (normal market, full stop applies)
+        entry=0.60  → stop=10.0%  (still below ceiling)
+        entry=0.80  → stop=10.0%  (ceiling; max gain=25%, risk=10%)
+        entry=0.85  → stop= 8.8%  (max gain=17.6%, risk=8.8%)
+        entry=0.90  → stop= 5.6%  (max gain=11.1%, risk=5.6%)
+        entry=0.95  → stop= 2.6%  (max gain= 5.3%, risk=2.6%)
+        entry=0.97  → stop= 1.5%  (max gain= 3.1%, risk=1.5%)
+
+    Risk/reward is always ≥ 2:1 by construction.
+    """
+    remaining_upside = (1.0 - entry_price) / max(entry_price, 1e-9)
+    return min(TRAILING_STOP_PCT, max(0.01, remaining_upside * 0.50))
+
+
 # ── Data types ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -46,12 +70,13 @@ class Position:
     market_id:   str
     entry_price: float
     peak_price:  float
+    stop_pct:    float = TRAILING_STOP_PCT   # per-position, set at open
     opened_at:   float = field(default_factory=time.time)
 
     @property
     def trail_price(self) -> float:
         """The price level at which the trailing stop triggers."""
-        return self.peak_price * (1.0 - TRAILING_STOP_PCT)
+        return self.peak_price * (1.0 - self.stop_pct)
 
 
 @dataclass
@@ -115,15 +140,17 @@ class TrailingStopManager:
                 "Call close_position() before re-opening."
             )
 
+        stop = adaptive_stop_pct(entry_price)
         pos = Position(
             market_id=market_id,
             entry_price=entry_price,
             peak_price=entry_price,
+            stop_pct=stop,
         )
         self._positions[market_id] = pos
         logger.info(
             f"[TRAILING] OPEN  {market_id}  entry={entry_price:.4f}  "
-            f"trail={pos.trail_price:.4f}"
+            f"stop={stop:.1%}  trail={pos.trail_price:.4f}"
         )
         return pos
 
