@@ -59,14 +59,15 @@ _load_dotenv()
 # ── 2. Project imports (after env vars are set) ───────────────────────────────
 
 import config
-from execution.order import OrderExecutor
+from execution.kalshi_order import KalshiOrderExecutor
 from execution.portfolio import Portfolio
 from intelligence.watchlist import MarketCandidate, build_watchlist
+from kalshi.api import get_market as _get_kalshi_market
 from obsidian.writer import ensure_vault, update_trade_outcome, update_trade_price, write_daily_report, write_skip, write_trade
-from polymarket.api import get_market as _get_market_direct
 from polymarket.traders import collect_all_signals, fetch_top_traders
 from strategy.conviction import ConvictionEngine, SignalAggregator
 from strategy.kalshi import get_kalshi_signal
+from strategy.kalshi_filter import KalshiMarketFilter
 from strategy.kelly import position_size
 from strategy.market_filter import MarketFilter
 from strategy.trailing_stop import TrailingStopManager
@@ -252,8 +253,9 @@ def run_once(
     aggregator: SignalAggregator,
     engine: ConvictionEngine,
     market_filter: MarketFilter,
+    kalshi_filter: KalshiMarketFilter,
     portfolio: Portfolio,
-    executor: OrderExecutor,
+    executor: KalshiOrderExecutor,
     stop_manager: TrailingStopManager,
     session_trades: list[dict],
     session_skips: list[dict],
@@ -354,6 +356,24 @@ def run_once(
             )
             continue
 
+        # Require a Kalshi ticker — without one we have no execution target.
+        if not kalshi_result.kalshi_ticker:
+            logger.info(f"[MAIN] {slug}: no Kalshi market match — skip (no execution target)")
+            session_skips.append({
+                "market_title": title,
+                "skip_reason": "no Kalshi market match",
+            })
+            continue
+
+        # Check Kalshi market quality (volume, open interest, timing).
+        if not kalshi_filter.is_tradeable(kalshi_result.kalshi_ticker):
+            logger.info(f"[MAIN] {slug}: Kalshi market {kalshi_result.kalshi_ticker} failed quality filter")
+            session_skips.append({
+                "market_title": title,
+                "skip_reason": f"Kalshi market {kalshi_result.kalshi_ticker} failed quality filter",
+            })
+            continue
+
         hours = _hours_to_close(metadata)
         if hours is None:
             logger.warning(f"[MAIN] {slug}: could not parse close time — skipping candidate")
@@ -367,6 +387,7 @@ def run_once(
             avg_trader_price=avg_trader_price,
             kalshi_signal=kalshi_result.signal,
             hours_to_resolution=hours,
+            kalshi_ticker=kalshi_result.kalshi_ticker,
         ))
 
     # ── e. JARVIS watchlist ───────────────────────────────────────────────
@@ -481,11 +502,26 @@ def run_once(
             )
             continue
 
+        # Fetch live Kalshi ask price for limit order submission.
+        kalshi_meta = _get_kalshi_market(entry.kalshi_ticker)
+        if kalshi_meta is None:
+            logger.warning(
+                f"[MAIN] {entry.market_id}: could not fetch Kalshi market data "
+                f"for {entry.kalshi_ticker} — skip"
+            )
+            continue
+        yes_ask_cents = kalshi_meta.get("yes_ask", 0)
+        if not isinstance(yes_ask_cents, int) or not (1 <= yes_ask_cents <= 99):
+            logger.warning(
+                f"[MAIN] {entry.market_id}: invalid yes_ask={yes_ask_cents} "
+                f"for {entry.kalshi_ticker} — skip"
+            )
+            continue
+
         result = executor.buy(
-            market_slug=entry.market_id,
-            token_id=token_id,
-            outcome=outcome,
-            price=entry.yes_price,
+            ticker=entry.kalshi_ticker,
+            side="yes",
+            price_cents=yes_ask_cents,
             size_dollars=size,
         )
 
@@ -537,71 +573,24 @@ def run_once(
                 pass
             continue
 
-        # Exit pricing — direct API call, bypasses market filter cache entirely.
-        #
-        # Strategy: try the slug first (clean path). If Gamma returns nothing
-        # (Data-API event slugs often differ from Gamma question slugs), retry
-        # with token_id so the lookup actually resolves.
-        #
-        # Contamination is blocked by the outcome-name check below — NOT by
-        # withholding token_id. If token_id resolves to the wrong market, that
-        # market's tokens will have different outcome names (e.g. a soccer
-        # market won't contain "Andrey Rublev"), the match fails, and we fall
-        # back to avg_price (hold) rather than use a corrupt price.
-        _exit_meta = _get_market_direct(slug) or {}
-        # Retry with token_id if the slug result has no tokens OR if the
-        # expected outcome token is absent (Gamma may return a different market
-        # for the same event — e.g. an over/under instead of the moneyline).
-        # The outcome-name check below still guards against wrong-market prices.
-        _outcome_in_meta = any(
-            str(t.get("outcome", "")).upper() == pos.outcome.upper()
-            for t in _exit_meta.get("tokens", [])
-        )
-        if not _outcome_in_meta:
-            _exit_meta = _get_market_direct(slug, token_id=pos.token_id) or {}
-        metadata = _exit_meta  # still used below for market title / Obsidian update
-        current_price = pos.avg_price  # safe default: no exit if price unavailable
-        for _tok in _exit_meta.get("tokens", []):
-            if str(_tok.get("outcome", "")).upper() == pos.outcome.upper():
-                try:
-                    _p = float(_tok.get("price", 0))
-                    if 0.0 <= _p <= 1.0:
-                        current_price = _p
-                except (TypeError, ValueError):
-                    pass
-                break  # stop after first outcome match — never read another market's tokens
+        # Exit pricing — fetch live Kalshi bid for this position.
+        # slug IS the Kalshi ticker (positions are keyed by ticker since the redesign).
+        _exit_meta = _get_kalshi_market(slug) or {}
+        metadata = _exit_meta
+        current_price = pos.avg_price   # safe hold-price default if API unavailable
 
-        # Fallback A: parse outcomePrices / outcomes (Gamma omits tokens[] for
-        # some markets and returns prices here instead).  The field can arrive
-        # as a Python list (already parsed by requests) OR as a JSON string —
-        # handle both so the TypeError from json.loads(list) doesn't swallow it.
-        if current_price == pos.avg_price:
-            try:
-                import json as _json
+        yes_bid_cents = _exit_meta.get("yes_bid", 0)
+        if isinstance(yes_bid_cents, int) and 1 <= yes_bid_cents <= 99:
+            current_price = yes_bid_cents / 100.0
+        elif isinstance(yes_bid_cents, (int, float)) and yes_bid_cents >= 1:
+            # Cent-scale float — normalise
+            current_price = float(yes_bid_cents) / 100.0
 
-                def _to_list(val):
-                    if isinstance(val, list):
-                        return val
-                    if isinstance(val, str) and val:
-                        return _json.loads(val)
-                    return []
-
-                _outcomes = _to_list(_exit_meta.get("outcomes"))
-                _prices   = _to_list(_exit_meta.get("outcomePrices"))
-                for _out, _pstr in zip(_outcomes, _prices):
-                    if str(_out).upper() == pos.outcome.upper():
-                        _p2 = float(_pstr)
-                        if 0.0 <= _p2 <= 1.0:
-                            current_price = _p2
-                        break
-            except (ValueError, TypeError):
-                pass
-
-        # Fallback B: market has resolved — determine 0.0/1.0 settlement price.
-        if current_price == pos.avg_price:
-            _resolved_price = _get_resolved_price(_exit_meta, pos.outcome, slug)
-            if _resolved_price is not None:
-                current_price = _resolved_price
+        # Settled market: Kalshi sets yes_bid=100 (winner) or yes_bid=0 (loser).
+        if yes_bid_cents == 100:
+            current_price = 1.0
+        elif yes_bid_cents == 0 and str(_exit_meta.get("status", "")).lower() in ("settled", "closed"):
+            current_price = 0.0
 
         # Track live price for end-of-run unrealized P&L log.
         _live_prices[slug] = current_price
@@ -640,7 +629,7 @@ def run_once(
             )
             sell_result = None
             try:
-                sell_result = executor.sell(slug, current_price)
+                sell_result = executor.sell(slug, "yes", yes_bid_cents or int(current_price * 100))
             except Exception as exc:
                 logger.error(
                     f"[MAIN] Take-profit sell threw exception for {slug}: {exc!r}"
@@ -695,7 +684,7 @@ def run_once(
             pos_avg_price = pos.avg_price
             sell_result = None
             try:
-                sell_result = executor.sell(slug, current_price)
+                sell_result = executor.sell(slug, "yes", yes_bid_cents or int(current_price * 100))
             except Exception as exc:
                 logger.error(
                     f"[MAIN] Stop-loss sell threw exception for {slug}: {exc!r}"
@@ -840,7 +829,8 @@ def main() -> None:
             + (f" ({skipped_rehydration} skipped — invalid avg_price)" if skipped_rehydration else "")
         )
 
-    executor = OrderExecutor(portfolio, market_filter)
+    kalshi_filter = KalshiMarketFilter()
+    executor = KalshiOrderExecutor(portfolio, kalshi_filter)
     aggregator = SignalAggregator()
     engine = ConvictionEngine()
 
@@ -869,7 +859,7 @@ def main() -> None:
     while running:
         try:
             run_once(
-                aggregator, engine, market_filter,
+                aggregator, engine, market_filter, kalshi_filter,
                 portfolio, executor, stop_manager,
                 session_trades, session_skips, session_flags,
             )

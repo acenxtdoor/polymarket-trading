@@ -24,7 +24,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-KALSHI_MARKETS_URL = "https://trading-api.kalshi.com/trade-api/v2/markets"
+KALSHI_MARKETS_URL = f"{config.KALSHI_BASE_URL}/markets"
 
 _cache: TTLCache = TTLCache(ttl=config.KALSHI_CACHE_TTL)
 
@@ -45,6 +45,7 @@ class KalshiResult:
     signal: str          # AGREE | DISAGREE | NO_MATCH
     multiplier: float
     kalshi_title: str = ""
+    kalshi_ticker: str = ""   # Kalshi market ticker for execution (e.g. "KXBTC-25JUN-T60000")
     kalshi_prob: float | None = None
     similarity: float = 0.0
 
@@ -153,6 +154,7 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
 
     kalshi_prob = _implied_prob(best_market)
     kalshi_title = best_market.get("title", "")
+    kalshi_ticker = best_market.get("ticker", "")
 
     if kalshi_prob is None:
         logger.info(f"[KALSHI] Could not compute implied prob for '{kalshi_title}' → no_match")
@@ -160,6 +162,7 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
             signal=NO_MATCH,
             multiplier=_MULTIPLIERS[NO_MATCH],
             kalshi_title=kalshi_title,
+            kalshi_ticker=kalshi_ticker,
             similarity=similarity,
         )
 
@@ -167,14 +170,14 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
     if diff <= config.KALSHI_AGREEMENT_THRESHOLD:
         signal = AGREE
         logger.info(
-            f"[KALSHI] AGREE — '{kalshi_title}' prob={kalshi_prob:.3f} vs "
+            f"[KALSHI] AGREE — '{kalshi_title}' ({kalshi_ticker}) prob={kalshi_prob:.3f} vs "
             f"polymarket={polymarket_price:.3f} diff={diff:.3f} (≤{config.KALSHI_AGREEMENT_THRESHOLD}) "
             f"similarity={similarity:.2f} → 1.5x"
         )
     else:
         signal = DISAGREE
         logger.info(
-            f"[KALSHI] DISAGREE — '{kalshi_title}' prob={kalshi_prob:.3f} vs "
+            f"[KALSHI] DISAGREE — '{kalshi_title}' ({kalshi_ticker}) prob={kalshi_prob:.3f} vs "
             f"polymarket={polymarket_price:.3f} diff={diff:.3f} (>{config.KALSHI_AGREEMENT_THRESHOLD}) "
             f"similarity={similarity:.2f} → skip"
         )
@@ -183,6 +186,7 @@ def get_kalshi_signal(market_title: str, polymarket_price: float) -> KalshiResul
         signal=signal,
         multiplier=_MULTIPLIERS[signal],
         kalshi_title=kalshi_title,
+        kalshi_ticker=kalshi_ticker,
         kalshi_prob=kalshi_prob,
         similarity=similarity,
     )

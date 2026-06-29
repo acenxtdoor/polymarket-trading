@@ -23,8 +23,8 @@ from datetime import date, datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import config
-from intelligence.analyst import MarketAssessment
-from news.newsapi import NewsArticle
+from intelligence.analyst import MarketAssessment, assess_markets_parallel
+from news.newsapi import NewsArticle, fetch_market_news
 from strategy.kalshi import AGREE, DISAGREE
 from utils.logger import get_logger
 
@@ -45,6 +45,7 @@ class MarketCandidate:
     avg_trader_price: float
     kalshi_signal: str            # AGREE | DISAGREE | NO_MATCH
     hours_to_resolution: float
+    kalshi_ticker: str = ""       # Kalshi market ticker for execution
     articles: list[NewsArticle] = field(default_factory=list)
 
 
@@ -60,8 +61,9 @@ class WatchlistEntry:
     summary: str
     flags: list[str]
     assessment: MarketAssessment
-    yes_price: float = 0.0          # current live market price (for Kelly denominator)
-    avg_trader_price: float = 0.0   # avg price top traders paid (for Kelly numerator / edge)
+    kalshi_ticker: str = ""          # Kalshi market ticker for execution
+    yes_price: float = 0.0           # current live market price (for Kelly denominator)
+    avg_trader_price: float = 0.0    # avg price top traders paid (for Kelly numerator / edge)
 
 
 @dataclass
@@ -134,17 +136,31 @@ def build_watchlist(
         f"{dropped_kalshi} Kalshi-disagree, {len(survivors)} to assess"
     )
 
-    # JARVIS offline — stub every assessment as "medium" so scoring
-    # falls back to pure conviction + Kalshi.  Re-enable when credits return.
-    assessments = {
-        c.market_id: MarketAssessment(
-            market_id=c.market_id,
-            confidence="medium",
-            summary="JARVIS offline — running on trader signals only.",
-            flags=[],
-        )
-        for c in survivors
-    }
+    # JARVIS assessment — parallel Claude calls, falls back to medium stub if offline.
+    if config.JARVIS_ENABLED:
+        assessments_input = [
+            {
+                "market_id": c.market_id,
+                "market_title": c.market_title,
+                "yes_price": c.yes_price,
+                "articles": c.articles or fetch_market_news(c.market_title),
+                "trader_count": c.trader_count,
+                "avg_trader_price": c.avg_trader_price,
+                "kalshi_signal": c.kalshi_signal,
+            }
+            for c in survivors
+        ]
+        assessments = assess_markets_parallel(assessments_input)
+    else:
+        assessments = {
+            c.market_id: MarketAssessment(
+                market_id=c.market_id,
+                confidence="medium",
+                summary="JARVIS offline — running on trader signals only.",
+                flags=[],
+            )
+            for c in survivors
+        }
 
     entries: list[WatchlistEntry] = []
     for c in survivors:
@@ -163,6 +179,7 @@ def build_watchlist(
             summary=assessment.summary,
             flags=assessment.flags,
             assessment=assessment,
+            kalshi_ticker=c.kalshi_ticker,
             yes_price=c.yes_price,
             avg_trader_price=c.avg_trader_price,
         ))

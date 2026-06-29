@@ -19,14 +19,25 @@ MIN_MARKET_LIQUIDITY = 1_000
 MIN_HOURS_TO_CLOSE = 24
 MAX_DAYS_TO_CLOSE = 90
 
+KALSHI_BASE_URL = "https://demo-api.kalshi.co/trade-api/v2"
 KALSHI_CACHE_TTL = 600         # 10 minutes
-KALSHI_ENABLED = False         # set True + add KALSHI_API_KEY once you have credentials
-KALSHI_API_KEY = os.getenv("KALSHI_API_KEY", "")
+KALSHI_ENABLED = True
+KALSHI_API_KEY_ID  = os.getenv("KALSHI_API_KEY_ID", "")
+KALSHI_API_KEY_FILE = os.getenv("KALSHI_API_KEY_FILE", "kalshi_private_key.pem")
 KALSHI_MATCH_THRESHOLD = 0.40  # minimum title similarity to consider a match
 KALSHI_AGREE_MULTIPLIER = 1.5
 KALSHI_DISAGREE_MULTIPLIER = 0.0
 KALSHI_NO_MATCH_MULTIPLIER = 1.0
 MARKET_CACHE_TTL = 300         # 5 minutes
+
+# Kalshi market quality filter
+KALSHI_MIN_VOLUME        = 1_000   # USD — Kalshi markets are smaller than Polymarket
+KALSHI_MIN_OPEN_INTEREST = 500     # USD — proxy for order book depth
+KALSHI_MIN_HOURS_TO_CLOSE = 24
+KALSHI_MAX_DAYS_TO_CLOSE  = 90
+
+# JARVIS toggle
+JARVIS_ENABLED = False             # set True + add ANTHROPIC_API_KEY to enable JARVIS
 
 REQUEST_TIMEOUT = 30
 
